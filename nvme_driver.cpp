@@ -1,4 +1,5 @@
 #include "nvme_driver.h"
+#include "nvme.h"
 
 #include "spdlog/spdlog.h"
 
@@ -50,9 +51,9 @@ void NVMeDriver::setup_admin_queue()
     uint64_t asq = nvmeq->sq_dma_addr;
     uint64_t acq = nvmeq->cq_dma_addr;
 
-    link->write_to_device((uint64_t)NVMeRegister::AQA, &aqa, sizeof(aqa));
-    link->write_to_device((uint64_t)NVMeRegister::ASQ, &asq, sizeof(asq));
-    link->write_to_device((uint64_t)NVMeRegister::ACQ, &acq, sizeof(acq));
+    link->write_to_device((uint64_t)NVME_REG_AQA, &aqa, sizeof(aqa));
+    link->write_to_device((uint64_t)NVME_REG_ASQ, &asq, sizeof(asq));
+    link->write_to_device((uint64_t)NVME_REG_ACQ, &acq, sizeof(acq));
 
     init_queue(0);
 }

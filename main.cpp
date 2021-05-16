@@ -6,6 +6,8 @@
 #include "spdlog/cfg/env.h"
 #include "spdlog/spdlog.h"
 
+#include <thread>
+
 using cxxopts::OptionException;
 
 cxxopts::ParseResult parse_arguments(int argc, char* argv[])
@@ -52,10 +54,12 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+    std::thread io_thread([&link]() { link.recv_thread(); });
+    io_thread.detach();
+
     NVMeDriver driver(8, &link, &memory_space);
 
-    int a = 123;
-    link.write_to_device(4, &a, sizeof(a));
+    link.stop();
 
     return 0;
 }

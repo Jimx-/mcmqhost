@@ -8,36 +8,6 @@
 #include <mutex>
 #include <vector>
 
-enum class NVMeRegister {
-    CAP = 0x0000,     /* Controller Capabilities */
-    VS = 0x0008,      /* Version */
-    INTMS = 0x000c,   /* Interrupt Mask Set */
-    INTMC = 0x0010,   /* Interrupt Mask Clear */
-    CC = 0x0014,      /* Controller Configuration */
-    CSTS = 0x001c,    /* Controller Status */
-    NSSR = 0x0020,    /* NVM Subsystem Reset */
-    AQA = 0x0024,     /* Admin Queue Attributes */
-    ASQ = 0x0028,     /* Admin SQ Base Address */
-    ACQ = 0x0030,     /* Admin CQ Base Address */
-    CMBLOC = 0x0038,  /* Controller Memory Buffer Location */
-    CMBSZ = 0x003c,   /* Controller Memory Buffer Size */
-    BPINFO = 0x0040,  /* Boot Partition Information */
-    BPRSEL = 0x0044,  /* Boot Partition Read Select */
-    BPMBL = 0x0048,   /* Boot Partition Memory Buffer
-                       * Location
-                       */
-    PMRCAP = 0x0e00,  /* Persistent Memory Capabilities */
-    PMRCTL = 0x0e04,  /* Persistent Memory Region Control */
-    PMRSTS = 0x0e08,  /* Persistent Memory Region Status */
-    PMREBS = 0x0e0c,  /* Persistent Memory Region Elasticity
-                       * Buffer Size
-                       */
-    PMRSWTP = 0x0e10, /* Persistent Memory Region Sustained
-                       * Write Throughput
-                       */
-    DBS = 0x1000,     /* SQ 0 Tail Doorbell */
-};
-
 class NVMeDriver {
 public:
     explicit NVMeDriver(unsigned ncpus, PCIeLink* link,
