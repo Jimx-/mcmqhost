@@ -8,6 +8,20 @@ set(TOPDIR ${PROJECT_SOURCE_DIR})
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
+find_package(Boost COMPONENTS system)
+if (NOT Boost_FOUND)
+    message(FATAL_ERROR "Fatal error: Boost (version >= 1.55) required.")
+else()
+    message(STATUS "Setting up BOOST")
+    message(STATUS " Includes - ${Boost_INCLUDE_DIRS}")
+    message(STATUS " Library  - ${Boost_LIBRARY_DIRS}")
+    message(STATUS " boost_system ${Boost_SYSTEM_LIBRARY}")
+    message(STATUS " boost_filesystem ${Boost_FILESYSTEM_LIBRARY}")
+    message(STATUS " boost_iostreams ${Boost_IOSTREAMS_LIBRARY}")
+    include_directories(${Boost_INCLUDE_DIRS})
+    link_directories(${Boost_LIBRARY_DIRS})
+endif (NOT Boost_FOUND)
+
 set(SOURCE_FILES
     main.cpp
 )

@@ -54,10 +54,12 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    std::thread io_thread([&link]() { link.recv_thread(); });
-    io_thread.detach();
+    link.start();
 
     NVMeDriver driver(8, &link, &memory_space);
+    driver.set_thread_id(0);
+
+    driver.read(0, 512);
 
     link.stop();
 

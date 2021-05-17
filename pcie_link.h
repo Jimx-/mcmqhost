@@ -5,17 +5,23 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 
 class PCIeLink {
 public:
-    PCIeLink() : sock_fd(-1), stopped(false) {}
+    PCIeLink() : sock_fd(-1), peer_fd(-1), event_fd(-1), stopped(false) {}
 
     bool init();
+    void start();
     void stop();
 
-    void recv_thread();
+    void set_irq_handler(std::function<void(uint16_t)>&& handler)
+    {
+        irq_handler = handler;
+    }
 
     size_t read_from_device(uint64_t addr, void* buf, size_t buflen);
 
@@ -25,15 +31,18 @@ public:
     }
 
 private:
-    int sock_fd, peer_fd;
+    int sock_fd, peer_fd, event_fd;
     std::mutex mutex, sock_mutex;
     std::atomic<bool> stopped;
     std::atomic<uint32_t> read_id_counter;
+    std::thread io_thread;
+    std::function<void(uint16_t)> irq_handler;
 
     enum class MessageType {
         READ_REQ = 1,
         WRITE_REQ = 2,
         READ_COMP = 3,
+        IRQ = 4,
     };
 
     struct ReadRequest {
@@ -51,6 +60,8 @@ private:
 
     void send_message(MessageType type, uint64_t addr, const void* buf,
                       size_t len);
+
+    void recv_thread();
 
     ReadRequest* setup_read_request(void* buf, size_t buflen);
     void complete_read_request(uint32_t id, const void* buf, size_t len);

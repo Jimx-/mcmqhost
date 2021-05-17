@@ -32,7 +32,7 @@ MemorySpace::MemorySpace(const fs::path& filename) : filename(filename)
     map_base = base;
     map_size = file_size;
 
-    spdlog::info("Mapped shared memory file, base = {}, size = {} MB", map_base,
+    spdlog::info("Mapped shared memory file base={} size={}MB", map_base,
                  map_size >> 20);
 
     struct hole* hp;

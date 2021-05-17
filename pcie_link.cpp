@@ -5,6 +5,8 @@
 
 #include <cstring>
 #include <netinet/in.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <vector>
@@ -54,8 +56,6 @@ bool PCIeLink::init()
     return true;
 }
 
-void PCIeLink::stop() { stopped.store(true); }
-
 void PCIeLink::send_message(MessageType type, uint64_t addr, const void* buf,
                             size_t len)
 {
@@ -71,8 +71,7 @@ void PCIeLink::send_message(MessageType type, uint64_t addr, const void* buf,
 
     if (buf) ::memcpy(&msg[12], buf, len);
 
-    spdlog::trace("Sending PCIe message, addr = {}, buf = {}, len = {}", addr,
-                  buf, len);
+    spdlog::trace("Sending PCIe message addr={} buf={} len={}", addr, buf, len);
     {
         std::lock_guard<std::mutex> guard(sock_mutex);
 
@@ -146,54 +145,116 @@ void PCIeLink::complete_read_request(uint32_t id, const void* buf, size_t len)
     }
 }
 
+void PCIeLink::start()
+{
+    event_fd = eventfd(0, 0);
+    assert(event_fd >= 0);
+
+    io_thread = std::thread([this]() { recv_thread(); });
+}
+
+void PCIeLink::stop()
+{
+    uint64_t val = 1;
+
+    stopped.store(true);
+    write(event_fd, &val, sizeof(val));
+
+    io_thread.join();
+    close(event_fd);
+    event_fd = -1;
+}
+
 void PCIeLink::recv_thread()
 {
+    int epfd;
+    struct epoll_event events[2] = {0};
     uint8_t rbuf[4096];
     jnk0le::Ringbuffer<uint8_t, 4096> ringbuf;
+    int retval;
+
+    epfd = epoll_create1(0);
+    assert(epfd >= 0);
+
+    events[0].events = EPOLLIN;
+
+    events[0].data.fd = peer_fd;
+    retval = epoll_ctl(epfd, EPOLL_CTL_ADD, peer_fd, &events[0]);
+    assert(!retval);
+
+    events[0].data.fd = event_fd;
+    retval = epoll_ctl(epfd, EPOLL_CTL_ADD, event_fd, &events[0]);
+    assert(!retval);
 
     while (!stopped.load()) {
-        int n = ::recv(peer_fd, rbuf, sizeof(rbuf), 0);
-
-        if (n < 0) {
+        int nevents = epoll_wait(epfd, events, 2, -1);
+        if (nevents < 0) {
             if (errno == EINTR) continue;
             break;
         }
 
-        ringbuf.writeBuff(rbuf, n);
+        if (stopped.load()) break;
 
-        while (ringbuf.readAvailable() > 2) {
-            uint16_t len;
-            uint16_t type;
-            uint32_t id;
-            size_t offset = 0;
-            std::vector<uint8_t> payload;
+        for (int i = 0; i < nevents; i++) {
+            struct epoll_event* event = &events[i];
 
-            ringbuf.readBuff((uint8_t*)&len, sizeof(len));
-            len = ntohs(len);
-            assert(ringbuf.readAvailable() >= len);
+            if (event->data.fd == peer_fd) {
+                int n = ::recv(peer_fd, rbuf, sizeof(rbuf), 0);
 
-            payload.resize(len);
-            ringbuf.readBuff(&payload[0], len);
+                if (n < 0) {
+                    if (errno == EINTR) continue;
+                    break;
+                }
 
-            assert(len >= sizeof(type));
-            type = *(uint16_t*)&payload[offset];
-            type = ntohs(type);
-            len -= sizeof(type);
-            offset += sizeof(type);
+                ringbuf.writeBuff(rbuf, n);
 
-            switch (type) {
-            case (int)MessageType::READ_COMP:
-                assert(len >= sizeof(id));
-                id = *(uint32_t*)&payload[offset];
-                len -= sizeof(id);
-                offset += sizeof(id);
+                while (ringbuf.readAvailable() > 2) {
+                    uint16_t len, type, vector;
+                    uint32_t id;
+                    size_t offset = 0;
+                    std::vector<uint8_t> payload;
 
-                spdlog::trace("Receive read complete message id={} len={}", id,
-                              len);
+                    ringbuf.readBuff((uint8_t*)&len, sizeof(len));
+                    len = ntohs(len);
+                    assert(ringbuf.readAvailable() >= len);
 
-                complete_read_request(id, &payload[offset], len);
-                break;
+                    payload.resize(len);
+                    ringbuf.readBuff(&payload[0], len);
+
+                    assert(len >= sizeof(type));
+                    type = *(uint16_t*)&payload[offset];
+                    type = ntohs(type);
+                    len -= sizeof(type);
+                    offset += sizeof(type);
+
+                    switch (type) {
+                    case (int)MessageType::READ_COMP:
+                        assert(len >= sizeof(id));
+                        id = *(uint32_t*)&payload[offset];
+                        len -= sizeof(id);
+                        offset += sizeof(id);
+
+                        spdlog::trace(
+                            "Receive read complete message id={} len={}", id,
+                            len);
+
+                        complete_read_request(id, &payload[offset], len);
+                        break;
+                    case (int)MessageType::IRQ:
+                        assert(len == sizeof(vector));
+                        vector = ntohs(*(uint16_t*)&payload[offset]);
+                        len -= sizeof(vector);
+                        offset += sizeof(vector);
+
+                        spdlog::trace("Receive IRQ message vector={}", vector);
+
+                        if (irq_handler) irq_handler(vector);
+                        break;
+                    }
+                }
             }
         }
     }
+
+    close(epfd);
 }
