@@ -72,10 +72,10 @@ int main(int argc, char* argv[])
     driver.start(config);
     driver.set_thread_id(0);
 
-    driver.write(16384, 8192);
+    driver.write(1, 16384, 8192);
     // for (int i = 0; i < 511; i++)
-    //     driver.write(8192, 8192);
-    driver.write(16384, 8192);
+    //     driver.write(1, 8192, 8192);
+    driver.write(2, 16384, 8192);
 
     link.stop();
 

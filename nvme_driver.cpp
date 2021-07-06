@@ -419,7 +419,8 @@ void NVMeDriver::nvme_irq(NVMeQueue* nvmeq)
     if (found) ring_cq_doorbell(nvmeq);
 }
 
-void NVMeDriver::submit_rw_command(bool do_write, loff_t pos, size_t size)
+void NVMeDriver::submit_rw_command(bool do_write, unsigned int nsid, loff_t pos,
+                                   size_t size)
 {
     uint16_t control = 0;
     uint32_t dsmgmt = 0;
@@ -431,7 +432,7 @@ void NVMeDriver::submit_rw_command(bool do_write, loff_t pos, size_t size)
 
     memset(&cmd, 0, sizeof(cmd));
     cmd.rw.opcode = (do_write ? nvme_cmd_write : nvme_cmd_read);
-    cmd.rw.nsid = endian::native_to_little(1);
+    cmd.rw.nsid = endian::native_to_little(nsid);
     cmd.rw.slba = endian::native_to_little(pos >> 9);
     cmd.rw.length = endian::native_to_little((size >> 9) - 1);
 

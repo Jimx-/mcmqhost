@@ -2,6 +2,34 @@
 
 #include <yaml-cpp/yaml.h>
 
+static void load_namespaces(YAML::Node namespaces, mcmq::SsdConfig& config)
+{
+    for (int i = 0; i < namespaces.size(); i++) {
+        YAML::Node ns = namespaces[i];
+        auto* ns_config = config.add_namespaces();
+
+        auto channels = ns["channels"];
+        for (int j = 0; j < channels.size(); j++) {
+            ns_config->add_channel_ids(channels[j].as<uint32_t>());
+        }
+
+        auto chips = ns["chips"];
+        for (int j = 0; j < chips.size(); j++) {
+            ns_config->add_chip_ids(chips[j].as<uint32_t>());
+        }
+
+        auto dies = ns["dies"];
+        for (int j = 0; j < dies.size(); j++) {
+            ns_config->add_die_ids(dies[j].as<uint32_t>());
+        }
+
+        auto planes = ns["planes"];
+        for (int j = 0; j < planes.size(); j++) {
+            ns_config->add_plane_ids(planes[j].as<uint32_t>());
+        }
+    }
+}
+
 bool ConfigReader::load_config(const std::string& filename,
                                mcmq::SsdConfig& config)
 {
@@ -85,6 +113,8 @@ bool ConfigReader::load_config(const std::string& filename,
 
     flash_config->set_page_capacity(
         flash_node["page_capacity"].as<uint32_t>(8192));
+
+    load_namespaces(root["namespaces"], config);
 
     return true;
 }

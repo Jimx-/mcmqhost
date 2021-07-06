@@ -11,6 +11,34 @@ gc_threshold:
 
 block_selection_policy: greedy
 
+namespaces:
+  - channels:
+    - 0
+    chips:
+    - 0
+    - 1
+    - 2
+    - 3
+    dies:
+    - 0
+    - 1
+    planes:
+    - 0
+    - 1
+  - channels:
+    - 1
+    chips:
+    - 0
+    - 1
+    - 2
+    - 3
+    dies:
+    - 0
+    - 1
+    planes:
+    - 0
+    - 1    
+    
 channel_count: 8
 
 channel:
@@ -31,7 +59,7 @@ flash:
     csb: 750000
     msb: 750000
 
-  block_erase_latency: 38000001
+  block_erase_latency: 3800000
 
   dies_per_chip: 2
   planes_per_die: 2

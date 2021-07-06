@@ -44,14 +44,14 @@ public:
 
     void set_thread_id(unsigned int thread_id);
 
-    void read(loff_t pos, size_t size)
+    void read(unsigned int nsid, loff_t pos, size_t size)
     {
-        return submit_rw_command(false, pos, size);
+        return submit_rw_command(false, nsid, pos, size);
     }
 
-    void write(loff_t pos, size_t size)
+    void write(unsigned int nsid, loff_t pos, size_t size)
     {
-        return submit_rw_command(true, pos, size);
+        return submit_rw_command(true, nsid, pos, size);
     }
 
 private:
@@ -159,7 +159,8 @@ private:
     void handle_cqe(NVMeQueue* nvmeq, uint16_t idx);
     void nvme_irq(NVMeQueue* nvmeq);
 
-    void submit_rw_command(bool do_write, loff_t pos, size_t size);
+    void submit_rw_command(bool do_write, unsigned int nsid, loff_t pos,
+                           size_t size);
 };
 
 #endif
