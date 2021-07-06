@@ -35,8 +35,20 @@ NVMeDriver::NVMeStatus NVMeDriver::AsyncCommand::wait(NVMeResult* resp)
 
 NVMeDriver::NVMeDriver(unsigned ncpus, PCIeLink* link,
                        MemorySpace* memory_space)
-    : link(link), memory_space(memory_space)
+    : ncpus(ncpus), link(link), memory_space(memory_space)
+{}
+
+void NVMeDriver::set_thread_id(unsigned int thread_id)
 {
+    assert(thread_id < queues.size() - 1);
+    thread_io_queue = queues[thread_id + 1].get();
+}
+
+void NVMeDriver::start(const mcmq::SsdConfig& config)
+{
+    link->send_config(config);
+    link->wait_for_device_ready();
+
     /* IO queues + admin queue */
     for (int i = 0; i < ncpus + 1; i++)
         queues.emplace_back(std::make_unique<NVMeQueue>());
@@ -47,12 +59,6 @@ NVMeDriver::NVMeDriver(unsigned ncpus, PCIeLink* link,
     });
 
     reset();
-}
-
-void NVMeDriver::set_thread_id(unsigned int thread_id)
-{
-    assert(thread_id < queues.size() - 1);
-    thread_io_queue = queues[thread_id + 1].get();
 }
 
 void NVMeDriver::allocate_queue(unsigned qid, unsigned depth)
@@ -176,6 +182,9 @@ void NVMeDriver::remove_async_command(uint16_t command_id)
 void NVMeDriver::write_sq_doorbell(NVMeQueue* nvmeq, bool write_sq)
 {
     uint32_t tail;
+
+    spdlog::trace("Writing SQ doorbell qid={} tail={}", nvmeq->qid,
+                  nvmeq->sq_tail);
 
     if (!write_sq) {
         uint16_t next_tail = nvmeq->sq_tail + 1;
@@ -416,6 +425,9 @@ void NVMeDriver::submit_rw_command(bool do_write, loff_t pos, size_t size)
     uint32_t dsmgmt = 0;
     struct nvme_command cmd;
     NVMeStatus status;
+
+    spdlog::trace("Submitting {} command slba={} size={}",
+                  do_write ? "write" : "read", pos, size);
 
     memset(&cmd, 0, sizeof(cmd));
     cmd.rw.opcode = (do_write ? nvme_cmd_write : nvme_cmd_read);

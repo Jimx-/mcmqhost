@@ -22,22 +22,38 @@ else()
     link_directories(${Boost_LIBRARY_DIRS})
 endif (NOT Boost_FOUND)
 
-set(SOURCE_FILES
-    main.cpp
-)
+find_package(Protobuf REQUIRED)
+if (NOT PROTOBUF_FOUND)
+    message(FATAL_ERROR "Fatal error: Protobuf required.")
+endif (NOT PROTOBUF_FOUND)
 
-set(EXT_SOURCE_FILES
+set(PROTO_FILES proto/ssd_config.proto)
+PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
+
+include_directories(${PROTOBUF_INCLUDE_DIRS}
+                    ${CMAKE_CURRENT_BINARY_DIR}
+                    )
+
+set(SOURCE_FILES
     pcie_link.cpp
     memory_space.cpp
     nvme_driver.cpp
+    config_reader.cpp
     main.cpp
+    
+    ${PROTO_SRCS}
+    ${PROTO_HDRS}    
 )
+
+set(EXT_SOURCE_FILES )
 
 set(LIBRARIES
     pthread
     atomic
     CONAN_PKG::spdlog
     CONAN_PKG::cxxopts
+    CONAN_PKG::yaml-cpp
+    ${PROTOBUF_LIBRARIES}
 )
     
 add_executable(mcmqhost ${SOURCE_FILES} ${EXT_SOURCE_FILES})

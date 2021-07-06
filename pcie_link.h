@@ -1,6 +1,8 @@
 #ifndef _PCIE_LINK_H_
 #define _PCIE_LINK_H_
 
+#include "ssd_config.pb.h"
+
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -12,7 +14,10 @@
 
 class PCIeLink {
 public:
-    PCIeLink() : sock_fd(-1), peer_fd(-1), event_fd(-1), stopped(false) {}
+    PCIeLink()
+        : sock_fd(-1), peer_fd(-1), event_fd(-1), stopped(false),
+          device_ready(false)
+    {}
 
     bool init();
     void start();
@@ -30,6 +35,10 @@ public:
         send_message(MessageType::WRITE_REQ, addr, buf, len);
     }
 
+    void send_config(const mcmq::SsdConfig& config);
+
+    void wait_for_device_ready();
+
 private:
     int sock_fd, peer_fd, event_fd;
     std::mutex mutex, sock_mutex;
@@ -37,12 +46,15 @@ private:
     std::atomic<uint32_t> read_id_counter;
     std::thread io_thread;
     std::function<void(uint16_t)> irq_handler;
+    bool device_ready;
+    std::condition_variable device_ready_cv;
 
     enum class MessageType {
         READ_REQ = 1,
         WRITE_REQ = 2,
         READ_COMP = 3,
         IRQ = 4,
+        DEV_READY = 5,
     };
 
     struct ReadRequest {

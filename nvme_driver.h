@@ -40,6 +40,8 @@ public:
     explicit NVMeDriver(unsigned ncpus, PCIeLink* link,
                         MemorySpace* memory_space);
 
+    void start(const mcmq::SsdConfig& config);
+
     void set_thread_id(unsigned int thread_id);
 
     void read(loff_t pos, size_t size)
@@ -99,6 +101,7 @@ private:
         uint16_t status;     /* did the command fail, and if so, why? */
     };
 
+    unsigned int ncpus;
     PCIeLink* link;
     MemorySpace* memory_space;
     std::vector<std::unique_ptr<NVMeQueue>> queues;

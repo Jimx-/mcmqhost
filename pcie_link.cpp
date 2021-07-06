@@ -83,6 +83,35 @@ void PCIeLink::send_message(MessageType type, uint64_t addr, const void* buf,
     }
 }
 
+void PCIeLink::send_config(const mcmq::SsdConfig& config)
+{
+    size_t msg_len = 2 + config.ByteSizeLong();
+    std::vector<uint8_t> msg;
+    msg.resize(msg_len);
+
+    *(uint16_t*)&msg[0] = htons(msg_len);
+
+    config.SerializeToArray(&msg[2], msg_len - 2);
+
+    {
+        std::lock_guard<std::mutex> guard(sock_mutex);
+
+        int n = ::send(peer_fd, &msg[0], msg.size(), 0);
+        if (n != msg.size()) {
+            spdlog::error("Failed to send SSD config");
+            throw std::runtime_error("Failed to send SSD config");
+        }
+    }
+}
+
+void PCIeLink::wait_for_device_ready()
+{
+    std::unique_lock<std::mutex> lock(mutex);
+
+    while (!device_ready)
+        device_ready_cv.wait(lock);
+}
+
 PCIeLink::ReadRequest* PCIeLink::setup_read_request(void* buf, size_t buflen)
 {
     std::lock_guard<std::mutex> guard(mutex);
@@ -250,6 +279,16 @@ void PCIeLink::recv_thread()
 
                         if (irq_handler) irq_handler(vector);
                         break;
+                    case (int)MessageType::DEV_READY: {
+                        spdlog::trace("Receive device ready message");
+
+                        std::unique_lock<std::mutex> lock(mutex);
+
+                        device_ready = true;
+                        device_ready_cv.notify_all();
+
+                        break;
+                    }
                     }
                 }
             }

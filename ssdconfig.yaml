@@ -1,0 +1,41 @@
+seed: 123
+
+cache_mode: no
+
+mapping_table_capacity: 2097152
+data_cache_capacity: 536870912
+
+gc_threshold:
+  normal: 20
+  hard: 200
+
+block_selection_policy: greedy
+
+channel_count: 8
+
+channel:
+  chips_per_channel: 4
+  transfer_rate: 300
+  width: 1
+
+flash:
+  technology: mlc
+
+  page_read_latency:
+    lsb: 75000
+    csb: 75000
+    msb: 75000
+
+  page_program_latency:
+    lsb: 750000
+    csb: 750000
+    msb: 750000
+
+  block_erase_latency: 38000001
+
+  dies_per_chip: 2
+  planes_per_die: 2
+  blocks_per_plane: 2048
+  pages_per_block: 256
+  
+  page_capacity: 8192

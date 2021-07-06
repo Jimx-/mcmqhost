@@ -1,3 +1,4 @@
+#include "config_reader.h"
 #include "memory_space.h"
 #include "nvme_driver.h"
 #include "pcie_link.h"
@@ -15,9 +16,12 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
     try {
         cxxopts::Options options(argv[0], " - Host frontend for MCMQ");
 
-        options.add_options()("m,memory", "Path to the shared memory file",
-                              cxxopts::value<std::string>()->default_value(
-                                  "/dev/shm/ivshmem"))("h,help", "Print help");
+        options.add_options()(
+            "m,memory", "Path to the shared memory file",
+            cxxopts::value<std::string>()->default_value("/dev/shm/ivshmem"))(
+            "c,config", "Path to the SSD config file",
+            cxxopts::value<std::string>()->default_value(
+                "ssdconfig.yaml"))("h,help", "Print help");
 
         auto result = options.parse(argc, argv);
 
@@ -39,10 +43,18 @@ int main(int argc, char* argv[])
     auto args = parse_arguments(argc, argv);
 
     std::string shared_memory;
+    std::string config_file;
     try {
         shared_memory = args["memory"].as<std::string>();
+        config_file = args["config"].as<std::string>();
     } catch (const OptionException& e) {
         spdlog::error("Failed to parse options: {}", e.what());
+        exit(EXIT_FAILURE);
+    }
+
+    mcmq::SsdConfig config;
+    if (!ConfigReader::load_config(config_file, config)) {
+        spdlog::error("Failed to read SSD config");
         exit(EXIT_FAILURE);
     }
 
@@ -57,9 +69,13 @@ int main(int argc, char* argv[])
     link.start();
 
     NVMeDriver driver(8, &link, &memory_space);
+    driver.start(config);
     driver.set_thread_id(0);
 
-    driver.read(0, 512);
+    driver.write(16384, 8192);
+    // for (int i = 0; i < 511; i++)
+    //     driver.write(8192, 8192);
+    driver.write(16384, 8192);
 
     link.stop();
 
