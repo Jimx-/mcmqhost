@@ -2,6 +2,7 @@
 #include "memory_space.h"
 #include "nvme_driver.h"
 #include "pcie_link.h"
+#include "result_exporter.h"
 
 #include "cxxopts.hpp"
 #include "spdlog/cfg/env.h"
@@ -21,7 +22,9 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
             cxxopts::value<std::string>()->default_value("/dev/shm/ivshmem"))(
             "c,config", "Path to the SSD config file",
             cxxopts::value<std::string>()->default_value(
-                "ssdconfig.yaml"))("h,help", "Print help");
+                "ssdconfig.yaml"))("r,result", "Path to the result file",
+                                   cxxopts::value<std::string>()->default_value(
+                                       "result.json"))("h,help", "Print help");
 
         auto result = options.parse(argc, argv);
 
@@ -43,10 +46,11 @@ int main(int argc, char* argv[])
     auto args = parse_arguments(argc, argv);
 
     std::string shared_memory;
-    std::string config_file;
+    std::string config_file, result_file;
     try {
         shared_memory = args["memory"].as<std::string>();
         config_file = args["config"].as<std::string>();
+        result_file = args["result"].as<std::string>();
     } catch (const OptionException& e) {
         spdlog::error("Failed to parse options: {}", e.what());
         exit(EXIT_FAILURE);
@@ -68,7 +72,7 @@ int main(int argc, char* argv[])
 
     link.start();
 
-    NVMeDriver driver(8, &link, &memory_space);
+    NVMeDriver driver(2, &link, &memory_space);
     driver.start(config);
     driver.set_thread_id(0);
 
@@ -76,6 +80,11 @@ int main(int argc, char* argv[])
     // for (int i = 0; i < 511; i++)
     //     driver.write(1, 8192, 8192);
     driver.write(2, 16384, 8192);
+
+    mcmq::SimResult result;
+    driver.report(result);
+
+    ResultExporter::export_result(result_file, result);
 
     link.stop();
 

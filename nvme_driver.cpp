@@ -20,14 +20,17 @@ NVMeDriver::DeviceIOError::DeviceIOError(const char* msg)
 
 NVMeDriver::NVMeStatus NVMeDriver::AsyncCommand::wait(NVMeResult* resp)
 {
-    std::unique_lock<std::mutex> lock(mutex);
     NVMeStatus out_status;
 
-    while (!completed)
-        cv.wait(lock);
+    {
+        std::unique_lock<std::mutex> lock(mutex);
 
-    if (resp) *resp = result;
-    out_status = status;
+        while (!completed)
+            cv.wait(lock);
+
+        if (resp) *resp = result;
+        out_status = status;
+    }
 
     driver->remove_async_command(id);
     return out_status;

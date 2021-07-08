@@ -27,7 +27,8 @@ if (NOT PROTOBUF_FOUND)
     message(FATAL_ERROR "Fatal error: Protobuf required.")
 endif (NOT PROTOBUF_FOUND)
 
-set(PROTO_FILES proto/ssd_config.proto)
+set(PROTO_FILES proto/ssd_config.proto
+                proto/sim_result.proto)
 PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
 
 include_directories(${PROTOBUF_INCLUDE_DIRS}
@@ -39,6 +40,7 @@ set(SOURCE_FILES
     memory_space.cpp
     nvme_driver.cpp
     config_reader.cpp
+    result_exporter.cpp
     main.cpp
     
     ${PROTO_SRCS}
@@ -53,6 +55,7 @@ set(LIBRARIES
     CONAN_PKG::spdlog
     CONAN_PKG::cxxopts
     CONAN_PKG::yaml-cpp
+    CONAN_PKG::nlohmann_json
     ${PROTOBUF_LIBRARIES}
 )
     

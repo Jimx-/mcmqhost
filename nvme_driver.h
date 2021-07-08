@@ -54,6 +54,8 @@ public:
         return submit_rw_command(true, nsid, pos, size);
     }
 
+    void report(mcmq::SimResult& result) { link->report(result); }
+
 private:
     static constexpr unsigned AQ_DEPTH = 32;
 

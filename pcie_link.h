@@ -1,6 +1,7 @@
 #ifndef _PCIE_LINK_H_
 #define _PCIE_LINK_H_
 
+#include "sim_result.pb.h"
 #include "ssd_config.pb.h"
 
 #include <atomic>
@@ -37,6 +38,8 @@ public:
 
     void send_config(const mcmq::SsdConfig& config);
 
+    void report(mcmq::SimResult& result);
+
     void wait_for_device_ready();
 
 private:
@@ -49,12 +52,19 @@ private:
     bool device_ready;
     std::condition_variable device_ready_cv;
 
+    std::vector<uint8_t> result_buf;
+    size_t result_len;
+    bool result_ready;
+    std::condition_variable result_cv;
+
     enum class MessageType {
         READ_REQ = 1,
         WRITE_REQ = 2,
         READ_COMP = 3,
         IRQ = 4,
         DEV_READY = 5,
+        REPORT = 6,
+        RESULT = 7,
     };
 
     struct ReadRequest {

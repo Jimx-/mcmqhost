@@ -85,13 +85,13 @@ void PCIeLink::send_message(MessageType type, uint64_t addr, const void* buf,
 
 void PCIeLink::send_config(const mcmq::SsdConfig& config)
 {
-    size_t msg_len = 2 + config.ByteSizeLong();
+    size_t msg_len = config.ByteSizeLong();
     std::vector<uint8_t> msg;
-    msg.resize(msg_len);
+    msg.resize(2 + msg_len);
 
     *(uint16_t*)&msg[0] = htons(msg_len);
 
-    config.SerializeToArray(&msg[2], msg_len - 2);
+    config.SerializeToArray(&msg[2], msg_len);
 
     {
         std::lock_guard<std::mutex> guard(sock_mutex);
@@ -110,6 +110,23 @@ void PCIeLink::wait_for_device_ready()
 
     while (!device_ready)
         device_ready_cv.wait(lock);
+}
+
+void PCIeLink::report(mcmq::SimResult& result)
+{
+    std::unique_lock<std::mutex> lock(mutex);
+
+    result_buf.clear();
+    result_len = 0;
+    result_ready = false;
+
+    send_message(MessageType::REPORT, 0, nullptr, 0);
+
+    while (!result_ready)
+        result_cv.wait(lock);
+
+    spdlog::trace("Buffer size {}", result_buf.size());
+    result.ParseFromArray(&result_buf[0], result_buf.size());
 }
 
 PCIeLink::ReadRequest* PCIeLink::setup_read_request(void* buf, size_t buflen)
@@ -238,7 +255,7 @@ void PCIeLink::recv_thread()
                 ringbuf.writeBuff(rbuf, n);
 
                 while (ringbuf.readAvailable() > 2) {
-                    uint16_t len, type, vector;
+                    uint16_t len, type, vector, buf_len;
                     uint32_t id;
                     size_t offset = 0;
                     std::vector<uint8_t> payload;
@@ -287,6 +304,34 @@ void PCIeLink::recv_thread()
                         device_ready = true;
                         device_ready_cv.notify_all();
 
+                        break;
+                    }
+                    case (int)MessageType::RESULT: {
+                        spdlog::trace("Receive result message");
+
+                        std::unique_lock<std::mutex> lock(mutex);
+
+                        if (result_buf.empty()) {
+                            assert(len >= sizeof(buf_len));
+                            buf_len = ntohs(*(uint16_t*)&payload[offset]);
+                            len -= sizeof(buf_len);
+                            offset += sizeof(buf_len);
+
+                            result_len = buf_len;
+                        }
+
+                        // result_buf.reserve(
+                        //     result_buf.size() +
+                        //     distance(payload.begin() + offset,
+                        //     payload.end()));
+                        result_buf.insert(result_buf.end(),
+                                          payload.begin() + offset,
+                                          payload.end());
+
+                        if (result_buf.size() == result_len) {
+                            result_ready = true;
+                            result_cv.notify_all();
+                        }
                         break;
                     }
                     }
