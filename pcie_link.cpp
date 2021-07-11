@@ -5,6 +5,7 @@
 
 #include <cstring>
 #include <netinet/in.h>
+#include <optional>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -233,6 +234,7 @@ void PCIeLink::recv_thread()
     assert(!retval);
 
     while (!stopped.load()) {
+        std::optional<uint16_t> last_len;
         int nevents = epoll_wait(epfd, events, 2, -1);
         if (nevents < 0) {
             if (errno == EINTR) continue;
@@ -252,17 +254,29 @@ void PCIeLink::recv_thread()
                     break;
                 }
 
+                spdlog::trace("Receive {} bytes from socket", n);
+
                 ringbuf.writeBuff(rbuf, n);
 
-                while (ringbuf.readAvailable() > 2) {
+                while ((!last_len && ringbuf.readAvailable() > 2) ||
+                       (last_len && ringbuf.readAvailable() >= *last_len)) {
                     uint16_t len, type, vector, buf_len;
                     uint32_t id;
                     size_t offset = 0;
                     std::vector<uint8_t> payload;
 
-                    ringbuf.readBuff((uint8_t*)&len, sizeof(len));
-                    len = ntohs(len);
-                    assert(ringbuf.readAvailable() >= len);
+                    if (!last_len) {
+                        ringbuf.readBuff((uint8_t*)&len, sizeof(len));
+                        len = ntohs(len);
+
+                        if (ringbuf.readAvailable() < len) {
+                            last_len = len;
+                            continue;
+                        }
+                    } else {
+                        len = *last_len;
+                        last_len = std::nullopt;
+                    }
 
                     payload.resize(len);
                     ringbuf.readBuff(&payload[0], len);
@@ -320,10 +334,9 @@ void PCIeLink::recv_thread()
                             result_len = buf_len;
                         }
 
-                        // result_buf.reserve(
-                        //     result_buf.size() +
-                        //     distance(payload.begin() + offset,
-                        //     payload.end()));
+                        result_buf.reserve(
+                            result_buf.size() +
+                            distance(payload.begin() + offset, payload.end()));
                         result_buf.insert(result_buf.end(),
                                           payload.begin() + offset,
                                           payload.end());
@@ -334,6 +347,9 @@ void PCIeLink::recv_thread()
                         }
                         break;
                     }
+                    default:
+                        spdlog::error("Bad message type {}", type);
+                        break;
                     }
                 }
             }

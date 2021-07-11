@@ -1,6 +1,6 @@
 seed: 123
 
-cache_mode: no
+cache_mode: write
 
 mapping_table_capacity: 2097152
 data_cache_capacity: 536870912

@@ -41,10 +41,11 @@ set(SOURCE_FILES
     nvme_driver.cpp
     config_reader.cpp
     result_exporter.cpp
+    io_thread.cpp
+    io_thread_synthetic.cpp    
     main.cpp
     
     ${PROTO_SRCS}
-    ${PROTO_HDRS}    
 )
 
 set(EXT_SOURCE_FILES )
@@ -56,6 +57,7 @@ set(LIBRARIES
     CONAN_PKG::cxxopts
     CONAN_PKG::yaml-cpp
     CONAN_PKG::nlohmann_json
+    CONAN_PKG::hdrhistogram-c
     ${PROTOBUF_LIBRARIES}
 )
     

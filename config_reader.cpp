@@ -2,11 +2,12 @@
 
 #include <yaml-cpp/yaml.h>
 
-static void load_namespaces(YAML::Node namespaces, mcmq::SsdConfig& config)
+static void load_ssd_namespaces(YAML::Node namespaces,
+                                mcmq::SsdConfig& ssd_config)
 {
     for (int i = 0; i < namespaces.size(); i++) {
         YAML::Node ns = namespaces[i];
-        auto* ns_config = config.add_namespaces();
+        auto* ns_config = ssd_config.add_namespaces();
 
         auto channels = ns["channels"];
         for (int j = 0; j < channels.size(); j++) {
@@ -30,8 +31,8 @@ static void load_namespaces(YAML::Node namespaces, mcmq::SsdConfig& config)
     }
 }
 
-bool ConfigReader::load_config(const std::string& filename,
-                               mcmq::SsdConfig& config)
+bool ConfigReader::load_ssd_config(const std::string& filename,
+                                   mcmq::SsdConfig& config)
 {
     YAML::Node root;
 
@@ -114,7 +115,99 @@ bool ConfigReader::load_config(const std::string& filename,
     flash_config->set_page_capacity(
         flash_node["page_capacity"].as<uint32_t>(8192));
 
-    load_namespaces(root["namespaces"], config);
+    load_ssd_namespaces(root["namespaces"], config);
+
+    return true;
+}
+
+static void load_workload_flow(YAML::Node flow_node, HostConfig& config)
+{
+    config.flows.push_back({});
+    auto& flow = config.flows.back();
+
+    auto ns = flow_node["namespace"].as<uint32_t>(0);
+    flow.nsid = ns;
+
+    auto type = flow_node["type"].as<std::string>("synthetic");
+    if (type == "synthetic") {
+        flow.type = FlowType::SYNTHETIC;
+
+        flow.synthetic.seed = flow_node["seed"].as<unsigned int>(123);
+
+        flow.synthetic.request_count =
+            flow_node["request_count"].as<size_t>(10000);
+
+        flow.synthetic.read_ratio = flow_node["read_ratio"].as<double>(0.5);
+
+        auto req_size_dist =
+            flow_node["request_size_distribution"].as<std::string>("constant");
+
+        flow.synthetic.request_size_mean =
+            flow_node["request_size_mean"].as<int>(8);
+
+        if (req_size_dist == "constant")
+            flow.synthetic.request_size_distribution =
+                RequestSizeDistribution::CONSTANT;
+        else if (req_size_dist == "normal") {
+            flow.synthetic.request_size_distribution =
+                RequestSizeDistribution::NORMAL;
+            flow.synthetic.request_size_variance =
+                flow_node["request_size_variance"].as<int>(0);
+        }
+
+        auto addr_dist =
+            flow_node["address_distribution"].as<std::string>("uniform");
+        if (addr_dist == "uniform")
+            flow.synthetic.address_distribution = AddressDistribution::UNIFORM;
+        else if (addr_dist == "zipfian") {
+            flow.synthetic.address_distribution = AddressDistribution::ZIPFIAN;
+            flow.synthetic.zipfian_alpha =
+                flow_node["zipfian_alpha"].as<double>(1.0);
+        }
+
+        flow.synthetic.address_alignment =
+            flow_node["address_alignment"].as<unsigned int>(0);
+
+        flow.synthetic.average_enqueued_requests =
+            flow_node["average_enqueued_requests"].as<unsigned int>(1);
+    }
+}
+
+bool ConfigReader::load_host_config(const std::string& filename,
+                                    const mcmq::SsdConfig& ssd_config,
+                                    HostConfig& config)
+{
+    YAML::Node root;
+
+    try {
+        root = YAML::LoadFile(filename);
+    } catch (YAML::BadFile&) {
+        return false;
+    }
+
+    config.sector_size = 512;
+
+    config.io_queue_depth = root["io_queue_depth"].as<unsigned int>(1024);
+
+    auto& flash_config = ssd_config.flash_config();
+    size_t chip_capacity_sects =
+        flash_config.nr_dies_per_chip() * flash_config.nr_planes_per_die() *
+        flash_config.nr_blocks_per_plane() * flash_config.nr_pages_per_block() *
+        flash_config.nr_pages_per_block() / config.sector_size;
+
+    for (int i = 0; i < ssd_config.namespaces_size(); i++) {
+        auto& ns = ssd_config.namespaces(i);
+        unsigned int nsid = i + 1;
+        size_t ns_capacity_sects =
+            chip_capacity_sects * ns.channel_ids_size() * ns.chip_ids_size();
+        config.namespaces.emplace(nsid, NamespaceDefinition{ns_capacity_sects});
+    }
+
+    auto flows = root["flows"];
+    for (int i = 0; i < flows.size(); i++) {
+        YAML::Node flow = flows[i];
+        load_workload_flow(flow, config);
+    }
 
     return true;
 }

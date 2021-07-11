@@ -20,6 +20,9 @@ public:
     using NVMeStatus = uint32_t;
     using NVMeResult = nvme_completion::nvme_result;
 
+    using AsyncCommandCallback =
+        std::function<void(NVMeStatus, const NVMeResult&)>;
+
     class AsyncCommand {
         friend class NVMeDriver;
 
@@ -35,31 +38,36 @@ public:
         NVMeStatus status;
         NVMeResult result;
         bool completed;
+        AsyncCommandCallback callback;
     };
 
-    explicit NVMeDriver(unsigned ncpus, PCIeLink* link,
-                        MemorySpace* memory_space);
+    explicit NVMeDriver(unsigned ncpus, unsigned int io_queue_depth,
+                        PCIeLink* link, MemorySpace* memory_space);
 
     void start(const mcmq::SsdConfig& config);
 
     void set_thread_id(unsigned int thread_id);
 
-    void read(unsigned int nsid, loff_t pos, size_t size)
+    void read(unsigned int nsid, loff_t pos, size_t size);
+
+    void write(unsigned int nsid, loff_t pos, size_t size);
+
+    void read_async(unsigned int nsid, loff_t pos, size_t size,
+                    AsyncCommandCallback&& callback)
     {
-        return submit_rw_command(false, nsid, pos, size);
+        (void)submit_rw_command(false, nsid, pos, size, std::move(callback));
     }
 
-    void write(unsigned int nsid, loff_t pos, size_t size)
+    void write_async(unsigned int nsid, loff_t pos, size_t size,
+                     AsyncCommandCallback&& callback)
     {
-        return submit_rw_command(true, nsid, pos, size);
+        (void)submit_rw_command(true, nsid, pos, size, std::move(callback));
     }
 
     void report(mcmq::SimResult& result) { link->report(result); }
 
 private:
     static constexpr unsigned AQ_DEPTH = 32;
-
-    static constexpr unsigned IO_QUEUE_DEPTH = 1024;
 
     struct NVMeQueue {
         std::mutex mutex;
@@ -117,6 +125,7 @@ private:
     uint32_t ctrl_config;
     uint32_t ctrl_page_size;
     int queue_depth;
+    int io_queue_depth;
     int db_stride;
 
     void reset();
@@ -128,7 +137,7 @@ private:
     void enable_controller();
     void wait_ready(bool enabled);
 
-    AsyncCommand* setup_async_command();
+    AsyncCommand* setup_async_command(AsyncCommandCallback&& callback);
     void remove_async_command(uint16_t command_id);
 
     void write_sq_doorbell(NVMeQueue* nvmeq, bool write_sq);
@@ -138,6 +147,9 @@ private:
                            bool write_sq);
     NVMeStatus submit_sync_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
                                    union nvme_completion::nvme_result* result);
+    AsyncCommand* submit_async_command(NVMeQueue* nvmeq,
+                                       struct nvme_command* cmd,
+                                       AsyncCommandCallback&& callback);
 
     NVMeDriver::NVMeStatus nvme_features(uint8_t op, unsigned int fid,
                                          unsigned int dword11,
@@ -161,8 +173,9 @@ private:
     void handle_cqe(NVMeQueue* nvmeq, uint16_t idx);
     void nvme_irq(NVMeQueue* nvmeq);
 
-    void submit_rw_command(bool do_write, unsigned int nsid, loff_t pos,
-                           size_t size);
+    AsyncCommand* submit_rw_command(bool do_write, unsigned int nsid,
+                                    loff_t pos, size_t size,
+                                    AsyncCommandCallback&& callback);
 };
 
 #endif

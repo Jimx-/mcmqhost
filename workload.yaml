@@ -1,0 +1,23 @@
+io_queue_depth: 1024
+
+flows:
+- namespace: 1
+  type: synthetic
+  seed: 17
+  request_count: 250000
+  read_ratio: 0.5
+  request_size_distribution: constant
+  request_size_mean: 8
+  address_alignment: 16
+  average_enqueued_requests: 4
+
+- namespace: 2
+  type: synthetic
+  seed: 47
+  request_count: 250000
+  read_ratio: 0.5
+  request_size_distribution: normal
+  request_size_mean: 8
+  request_size_variance: 1
+  address_distribution: zipfian
+  zipfian_alpha: 1.2
