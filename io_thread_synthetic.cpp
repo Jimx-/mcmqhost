@@ -11,9 +11,9 @@ IOThreadSynthetic::IOThreadSynthetic(
     int request_size_variance, AddressDistribution addr_distribution,
     double zipfian_alpha, unsigned int addr_alignment,
     unsigned int average_enqueued_requests)
-    : IOThread(driver, thread_id, queue_depth), nsid(nsid),
-      sector_size(sector_size), request_count(request_count), max_lsa(max_lsa),
-      generator(seed), read_ratio(read_ratio),
+    : IOThread(driver, thread_id, queue_depth, request_count), nsid(nsid),
+      sector_size(sector_size), max_lsa(max_lsa), generator(seed),
+      read_ratio(read_ratio),
       request_size_distribution(request_size_distribution),
       request_size_mean(request_size_mean),
       request_size_variance(request_size_variance),

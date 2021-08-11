@@ -6,7 +6,7 @@
 #include <iomanip>
 #include <iostream>
 
-static const int TICKS_PER_HALF_DISTANCE = 5;
+static const int TICKS_PER_HALF_DISTANCE = 10;
 
 using json = nlohmann::json;
 
@@ -64,6 +64,72 @@ static json export_queue_stats(const mcmq::HostQueueStats& queue_stats)
     return obj;
 }
 
+static json
+export_nvm_controller_stats(const mcmq::NvmControllerStats& ctlr_stats)
+{
+    json obj;
+
+    obj["read_command_count"] = ctlr_stats.read_command_count();
+    obj["multiplane_read_command_count"] =
+        ctlr_stats.multiplane_read_command_count();
+    obj["program_command_count"] = ctlr_stats.program_command_count();
+    obj["multiplane_program_command_count"] =
+        ctlr_stats.multiplane_program_command_count();
+    obj["erase_command_count"] = ctlr_stats.erase_command_count();
+    obj["multiplane_erase_command_count"] =
+        ctlr_stats.multiplane_erase_command_count();
+
+    return obj;
+}
+
+static json export_tsu_stats(const mcmq::TSUStats& tsu_stats)
+{
+    json obj;
+
+    obj["enqueued_read_transactions"] = tsu_stats.enqueued_read_transactions();
+    obj["read_waiting_time_mean"] = tsu_stats.read_waiting_time_mean();
+    obj["read_waiting_time_stddev"] = tsu_stats.read_waiting_time_stddev();
+    obj["max_read_waiting_time"] = tsu_stats.max_read_waiting_time();
+
+    auto read_waiting_time_histogram = json::array();
+
+    for (int i = 0; i < tsu_stats.read_waiting_time_histogram_size(); i++) {
+        read_waiting_time_histogram.push_back(
+            export_histogram_entry(tsu_stats.read_waiting_time_histogram(i)));
+    }
+    obj["read_waiting_time_histogram"] = read_waiting_time_histogram;
+
+    obj["enqueued_write_transactions"] =
+        tsu_stats.enqueued_write_transactions();
+    obj["write_waiting_time_mean"] = tsu_stats.write_waiting_time_mean();
+    obj["write_waiting_time_stddev"] = tsu_stats.write_waiting_time_stddev();
+    obj["max_write_waiting_time"] = tsu_stats.max_write_waiting_time();
+
+    auto write_waiting_time_histogram = json::array();
+
+    for (int i = 0; i < tsu_stats.write_waiting_time_histogram_size(); i++) {
+        write_waiting_time_histogram.push_back(
+            export_histogram_entry(tsu_stats.write_waiting_time_histogram(i)));
+    }
+    obj["write_waiting_time_histogram"] = write_waiting_time_histogram;
+
+    obj["enqueued_erase_transactions"] =
+        tsu_stats.enqueued_erase_transactions();
+    obj["erase_waiting_time_mean"] = tsu_stats.erase_waiting_time_mean();
+    obj["erase_waiting_time_stddev"] = tsu_stats.erase_waiting_time_stddev();
+    obj["max_erase_waiting_time"] = tsu_stats.max_erase_waiting_time();
+
+    auto erase_waiting_time_histogram = json::array();
+
+    for (int i = 0; i < tsu_stats.erase_waiting_time_histogram_size(); i++) {
+        erase_waiting_time_histogram.push_back(
+            export_histogram_entry(tsu_stats.erase_waiting_time_histogram(i)));
+    }
+    obj["erase_waiting_time_histogram"] = erase_waiting_time_histogram;
+
+    return obj;
+}
+
 static void export_sim_result(json& root, const mcmq::SimResult& sim_result)
 {
     json host_queue_stats = json::array();
@@ -74,6 +140,11 @@ static void export_sim_result(json& root, const mcmq::SimResult& sim_result)
     }
 
     root["host_queue_stats"] = host_queue_stats;
+
+    root["nvm_controller_stats"] =
+        export_nvm_controller_stats(sim_result.nvm_controller_stats());
+
+    root["tsu_stats"] = export_tsu_stats(sim_result.tsu_stats());
 }
 
 static json export_histogram(const hdr_histogram* hist)
@@ -83,7 +154,7 @@ static json export_histogram(const hdr_histogram* hist)
     struct hdr_iter iter;
     struct hdr_iter_percentiles* percentiles;
 
-    hdr_iter_percentile_init(&iter, hist, 5);
+    hdr_iter_percentile_init(&iter, hist, TICKS_PER_HALF_DISTANCE);
 
     percentiles = &iter.specifics.percentiles;
     while (hdr_iter_next(&iter)) {

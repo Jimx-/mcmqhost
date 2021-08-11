@@ -85,7 +85,8 @@ int main(int argc, char* argv[])
 
     link.start();
 
-    NVMeDriver driver(2, host_config.io_queue_depth, &link, &memory_space);
+    NVMeDriver driver(host_config.flows.size(), host_config.io_queue_depth,
+                      &link, &memory_space);
     driver.start(ssd_config);
 
     int thread_id = 1;

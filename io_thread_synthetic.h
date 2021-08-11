@@ -21,7 +21,6 @@ private:
     unsigned int nsid;
     unsigned int sector_size;
     size_t max_lsa;
-    size_t request_count;
     double read_ratio;
     std::default_random_engine generator;
 

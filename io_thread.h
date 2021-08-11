@@ -50,7 +50,8 @@ public:
     void join();
 
 protected:
-    IOThread(NVMeDriver* driver, int thread_id, unsigned int queue_depth);
+    IOThread(NVMeDriver* driver, int thread_id, unsigned int queue_depth,
+             size_t request_count);
 
     virtual void run_impl() = 0;
 
@@ -60,6 +61,8 @@ protected:
     void wait_for_completed_requests();
 
     virtual void on_request_completed() = 0;
+
+    size_t request_count;
 
     size_t nr_submitted_requests;
 

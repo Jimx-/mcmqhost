@@ -3,9 +3,11 @@
 
 #include "spdlog/spdlog.h"
 
-IOThread::IOThread(NVMeDriver* driver, int thread_id, unsigned int queue_depth)
+IOThread::IOThread(NVMeDriver* driver, int thread_id, unsigned int queue_depth,
+                   size_t request_count)
     : driver(driver), thread_id(thread_id), queue_depth(queue_depth),
-      nr_submitted_requests(0), nr_completed_requests(0), inflight_requests(0),
+      request_count(request_count), nr_submitted_requests(0),
+      nr_completed_requests(0), inflight_requests(0),
       nr_completed_read_requests(0), nr_completed_write_requests(0),
       transferred_bytes_total(0), transferred_bytes_read(0),
       transferred_bytes_write(0)
@@ -57,15 +59,17 @@ void IOThread::run()
         stats.bandwidth_read = transferred_bytes_read / delta.count();
         stats.bandwidth_write = transferred_bytes_write / delta.count();
 
-        spdlog::info("Thread stats: Request count (total/read/write): {}/{}/{}",
-                     nr_completed_requests, nr_completed_read_requests,
-                     nr_completed_write_requests);
         spdlog::info(
-            "Thread stats: IOPS (total/read/write): {:.2f}/{:.2f}/{:.2f}",
-            stats.iops_total, stats.iops_read, stats.iops_write);
+            "Thread {} stats: Request count (total/read/write): {}/{}/{}",
+            thread_id, nr_completed_requests, nr_completed_read_requests,
+            nr_completed_write_requests);
         spdlog::info(
-            "Thread stats: Bandwidth (total/read/write): {:.2f}/{:.2f}/{:.2f}",
-            stats.bandwidth_total, stats.bandwidth_read, stats.bandwidth_write);
+            "Thread {} stats: IOPS (total/read/write): {:.2f}/{:.2f}/{:.2f}",
+            thread_id, stats.iops_total, stats.iops_read, stats.iops_write);
+        spdlog::info("Thread {} stats: Bandwidth (total/read/write): "
+                     "{:.2f}/{:.2f}/{:.2f}",
+                     thread_id, stats.bandwidth_total, stats.bandwidth_read,
+                     stats.bandwidth_write);
     });
 }
 
@@ -166,9 +170,15 @@ void IOThread::wait_for_completed_requests()
 
 void IOThread::process_completed_request(IORequest* req)
 {
+    static const size_t LOG_STEP = 10000;
+
     inflight_requests--;
     nr_completed_requests++;
     transferred_bytes_total += req->size;
+
+    if (nr_completed_requests % LOG_STEP == 0)
+        spdlog::info("Thread {} {}/{} requests completed", thread_id,
+                     nr_completed_requests, request_count);
 
     if (req->do_write) {
         nr_completed_write_requests++;
