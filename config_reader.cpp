@@ -2,6 +2,62 @@
 
 #include <yaml-cpp/yaml.h>
 
+static mcmq::PlaneAllocateScheme
+get_plane_allocate_scheme(const std::string& scheme)
+{
+    if (scheme == "CWDP") {
+        return mcmq::PAS_CWDP;
+    } else if (scheme == "CWPD") {
+        return mcmq::PAS_CWPD;
+    } else if (scheme == "CDWP") {
+        return mcmq::PAS_CDWP;
+    } else if (scheme == "CDPW") {
+        return mcmq::PAS_CDPW;
+    } else if (scheme == "CPWD") {
+        return mcmq::PAS_CPWD;
+    } else if (scheme == "CPDW") {
+        return mcmq::PAS_CPDW;
+    } else if (scheme == "WCDP") {
+        return mcmq::PAS_WCDP;
+    } else if (scheme == "WCPD") {
+        return mcmq::PAS_WCPD;
+    } else if (scheme == "WDCP") {
+        return mcmq::PAS_WDCP;
+    } else if (scheme == "WDPC") {
+        return mcmq::PAS_WDPC;
+    } else if (scheme == "WPCD") {
+        return mcmq::PAS_WPCD;
+    } else if (scheme == "WPDC") {
+        return mcmq::PAS_WPDC;
+    } else if (scheme == "DCWP") {
+        return mcmq::PAS_DCWP;
+    } else if (scheme == "DCPW") {
+        return mcmq::PAS_DCPW;
+    } else if (scheme == "DWCP") {
+        return mcmq::PAS_DWCP;
+    } else if (scheme == "DWPC") {
+        return mcmq::PAS_DWPC;
+    } else if (scheme == "DPCW") {
+        return mcmq::PAS_DPCW;
+    } else if (scheme == "DPWC") {
+        return mcmq::PAS_DPWC;
+    } else if (scheme == "PCWD") {
+        return mcmq::PAS_PCWD;
+    } else if (scheme == "PCDW") {
+        return mcmq::PAS_PCDW;
+    } else if (scheme == "PWCD") {
+        return mcmq::PAS_PWCD;
+    } else if (scheme == "PWDC") {
+        return mcmq::PAS_PWDC;
+    } else if (scheme == "PDCW") {
+        return mcmq::PAS_PDCW;
+    } else if (scheme == "PDWC") {
+        return mcmq::PAS_PDWC;
+    }
+
+    return mcmq::PAS_CWDP;
+}
+
 static void load_ssd_namespaces(YAML::Node namespaces,
                                 mcmq::SsdConfig& ssd_config)
 {
@@ -28,6 +84,12 @@ static void load_ssd_namespaces(YAML::Node namespaces,
         for (int j = 0; j < planes.size(); j++) {
             ns_config->add_plane_ids(planes[j].as<uint32_t>());
         }
+
+        auto plane_allocate_scheme =
+            (ns["plane_allocate_scheme"].as<std::string>("CWDP"));
+
+        ns_config->set_plane_allocate_scheme(
+            get_plane_allocate_scheme(plane_allocate_scheme));
     }
 }
 
