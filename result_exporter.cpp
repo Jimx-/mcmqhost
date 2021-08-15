@@ -64,6 +64,18 @@ static json export_queue_stats(const mcmq::HostQueueStats& queue_stats)
     return obj;
 }
 
+static json export_chip_stats(const mcmq::ChipStats& chip_stats)
+{
+    json obj;
+
+    obj["channel_id"] = chip_stats.channel_id();
+    obj["chip_id"] = chip_stats.chip_id();
+    obj["total_transfer_time"] = chip_stats.total_transfer_time();
+    obj["total_execution_time"] = chip_stats.total_execution_time();
+
+    return obj;
+}
+
 static json
 export_nvm_controller_stats(const mcmq::NvmControllerStats& ctlr_stats)
 {
@@ -79,6 +91,12 @@ export_nvm_controller_stats(const mcmq::NvmControllerStats& ctlr_stats)
     obj["multiplane_erase_command_count"] =
         ctlr_stats.multiplane_erase_command_count();
 
+    json chip_stats = json::array();
+    for (int i = 0; i < ctlr_stats.chip_stats_size(); i++) {
+        chip_stats.push_back(export_chip_stats(ctlr_stats.chip_stats(i)));
+    }
+    obj["chip_stats"] = chip_stats;
+
     return obj;
 }
 
@@ -86,46 +104,34 @@ static json export_tsu_stats(const mcmq::TSUStats& tsu_stats)
 {
     json obj;
 
+#define EXPORT_HIST(name)                                                    \
+    do {                                                                     \
+        obj[#name "_time_mean"] = tsu_stats.name##_time_mean();              \
+        obj[#name "_time_stddev"] = tsu_stats.name##_time_stddev();          \
+        obj["max_" #name "_time"] = tsu_stats.max_##name##_time();           \
+        auto histogram = json::array();                                      \
+        for (int i = 0; i < tsu_stats.name##_time_histogram_size(); i++) {   \
+            histogram.push_back(                                             \
+                export_histogram_entry(tsu_stats.name##_time_histogram(i))); \
+        }                                                                    \
+        obj[#name "_time_histogram"] = histogram;                            \
+    } while (0)
+
     obj["enqueued_read_transactions"] = tsu_stats.enqueued_read_transactions();
-    obj["read_waiting_time_mean"] = tsu_stats.read_waiting_time_mean();
-    obj["read_waiting_time_stddev"] = tsu_stats.read_waiting_time_stddev();
-    obj["max_read_waiting_time"] = tsu_stats.max_read_waiting_time();
-
-    auto read_waiting_time_histogram = json::array();
-
-    for (int i = 0; i < tsu_stats.read_waiting_time_histogram_size(); i++) {
-        read_waiting_time_histogram.push_back(
-            export_histogram_entry(tsu_stats.read_waiting_time_histogram(i)));
-    }
-    obj["read_waiting_time_histogram"] = read_waiting_time_histogram;
-
     obj["enqueued_write_transactions"] =
         tsu_stats.enqueued_write_transactions();
-    obj["write_waiting_time_mean"] = tsu_stats.write_waiting_time_mean();
-    obj["write_waiting_time_stddev"] = tsu_stats.write_waiting_time_stddev();
-    obj["max_write_waiting_time"] = tsu_stats.max_write_waiting_time();
-
-    auto write_waiting_time_histogram = json::array();
-
-    for (int i = 0; i < tsu_stats.write_waiting_time_histogram_size(); i++) {
-        write_waiting_time_histogram.push_back(
-            export_histogram_entry(tsu_stats.write_waiting_time_histogram(i)));
-    }
-    obj["write_waiting_time_histogram"] = write_waiting_time_histogram;
-
     obj["enqueued_erase_transactions"] =
         tsu_stats.enqueued_erase_transactions();
-    obj["erase_waiting_time_mean"] = tsu_stats.erase_waiting_time_mean();
-    obj["erase_waiting_time_stddev"] = tsu_stats.erase_waiting_time_stddev();
-    obj["max_erase_waiting_time"] = tsu_stats.max_erase_waiting_time();
 
-    auto erase_waiting_time_histogram = json::array();
+    EXPORT_HIST(read_waiting);
+    EXPORT_HIST(write_waiting);
+    EXPORT_HIST(erase_waiting);
 
-    for (int i = 0; i < tsu_stats.erase_waiting_time_histogram_size(); i++) {
-        erase_waiting_time_histogram.push_back(
-            export_histogram_entry(tsu_stats.erase_waiting_time_histogram(i)));
-    }
-    obj["erase_waiting_time_histogram"] = erase_waiting_time_histogram;
+    EXPORT_HIST(read_transfer);
+    EXPORT_HIST(read_execution);
+
+    EXPORT_HIST(write_transfer);
+    EXPORT_HIST(write_execution);
 
     return obj;
 }
