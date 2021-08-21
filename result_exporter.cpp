@@ -200,8 +200,21 @@ static json export_thread_stats(const IOThread::Stats& stats)
 
     root["device_response_time_histogram"] =
         export_histogram(stats.device_response_time_hist.get());
+    root["device_response_time_mean"] =
+        hdr_mean(stats.device_response_time_hist.get());
+    root["device_response_time_stddev"] =
+        hdr_stddev(stats.device_response_time_hist.get());
+    root["max_device_response_time"] =
+        hdr_max(stats.device_response_time_hist.get());
+
     root["end_to_end_request_latency_histogram"] =
         export_histogram(stats.e2e_latency_hist.get());
+    root["end_to_end_request_latency_mean"] =
+        hdr_mean(stats.e2e_latency_hist.get());
+    root["end_to_end_request_latency_stddev"] =
+        hdr_stddev(stats.e2e_latency_hist.get());
+    root["max_end_to_end_request_latency"] =
+        hdr_max(stats.e2e_latency_hist.get());
 
     return root;
 }
