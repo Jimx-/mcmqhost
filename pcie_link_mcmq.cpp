@@ -191,7 +191,7 @@ void PCIeLinkMcmq::recv_thread()
     int epfd;
     struct epoll_event events[2] = {0};
     uint8_t rbuf[4096];
-    jnk0le::Ringbuffer<uint8_t, 4096> ringbuf;
+    jnk0le::Ringbuffer<uint8_t, 16384> ringbuf;
     int retval;
 
     epfd = epoll_create1(0);

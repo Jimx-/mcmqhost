@@ -123,7 +123,7 @@ int main(int argc, char* argv[])
     link->start();
 
     NVMeDriver driver(host_config.flows.size(), host_config.io_queue_depth,
-                      link.get(), memory_space.get());
+                      link.get(), memory_space.get(), false);
     driver.start(ssd_config);
 
     int thread_id = 1;

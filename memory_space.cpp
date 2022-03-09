@@ -135,7 +135,18 @@ void MemorySpace::read(Address addr, void* buf, size_t len)
 
     addr -= iova_base;
     assert(addr < map_size && addr + len <= map_size);
-    ::memcpy(buf, (char*)map_base + addr, len);
+
+    switch (len) {
+    case 4:
+        *(uint32_t*)buf = *(uint32_t*)((char*)map_base + addr);
+        break;
+    case 8:
+        *(uint64_t*)buf = *(uint64_t*)((char*)map_base + addr);
+        break;
+    default:
+        ::memcpy(buf, (char*)map_base + addr, len);
+        break;
+    }
 }
 
 void MemorySpace::write(Address addr, const void* buf, size_t len)
@@ -144,7 +155,18 @@ void MemorySpace::write(Address addr, const void* buf, size_t len)
 
     addr -= iova_base;
     assert(addr < map_size && addr + len <= map_size);
-    ::memcpy((char*)map_base + addr, buf, len);
+
+    switch (len) {
+    case 4:
+        *(uint32_t*)((char*)map_base + addr) = *(uint32_t*)buf;
+        break;
+    case 8:
+        *(uint64_t*)((char*)map_base + addr) = *(uint64_t*)buf;
+        break;
+    default:
+        ::memcpy((char*)map_base + addr, buf, len);
+        break;
+    }
 }
 
 void MemorySpace::memset(Address addr, int c, size_t len)
