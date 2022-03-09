@@ -37,10 +37,18 @@ NVMeDriver::NVMeStatus NVMeDriver::AsyncCommand::wait(NVMeResult* resp)
 }
 
 NVMeDriver::NVMeDriver(unsigned ncpus, unsigned int io_queue_depth,
-                       PCIeLink* link, MemorySpace* memory_space)
+                       PCIeLink* link, MemorySpace* memory_space,
+                       bool use_dbbuf)
     : ncpus(ncpus), io_queue_depth(io_queue_depth), link(link),
-      memory_space(memory_space)
-{}
+      memory_space(memory_space), online_queues(0)
+{
+    if (use_dbbuf) {
+        dbbuf_dbs = memory_space->allocate(0x1000);
+        memory_space->memset(dbbuf_dbs, 0, 0x1000);
+        spdlog::info("Allocated doorbell buffer at {:#x}", dbbuf_dbs);
+    } else
+        dbbuf_dbs = 0;
+}
 
 void NVMeDriver::set_thread_id(unsigned int thread_id)
 {
@@ -94,6 +102,12 @@ void NVMeDriver::init_queue(unsigned qid)
     nvmeq->cq_head = 0;
     nvmeq->q_db = NVME_REG_DBS + qid * 8 * db_stride;
     nvmeq->cq_phase = 1;
+
+    if (dbbuf_dbs && qid) {
+        nvmeq->dbbuf_sq_db = dbbuf_dbs + qid * 8 * db_stride;
+        nvmeq->dbbuf_cq_db = dbbuf_dbs + qid * 8 * db_stride + 4 * db_stride;
+    }
+
     memory_space->memset(nvmeq->cq_dma_addr, 0, CQ_SIZE(nvmeq));
     online_queues++;
 }
@@ -111,6 +125,10 @@ void NVMeDriver::reset()
     setup_admin_queue();
 
     setup_io_queues();
+
+    if (dbbuf_dbs) {
+        dbbuf_config();
+    }
 }
 
 void NVMeDriver::wait_ready(bool enabled)
@@ -199,14 +217,23 @@ void NVMeDriver::write_sq_doorbell(NVMeQueue* nvmeq, bool write_sq)
     }
 
     tail = nvmeq->sq_tail;
-    link->writel(nvmeq->q_db, tail);
+
+    if (nvmeq->dbbuf_sq_db)
+        memory_space->write(nvmeq->dbbuf_sq_db, &tail, sizeof(tail));
+    else
+        link->writel(nvmeq->q_db, tail);
+
     nvmeq->last_sq_tail = nvmeq->sq_tail;
 }
 
 void NVMeDriver::ring_cq_doorbell(NVMeQueue* nvmeq)
 {
     uint32_t head = nvmeq->cq_head;
-    link->writel(nvmeq->q_db + 4 * db_stride, head);
+
+    if (nvmeq->dbbuf_cq_db)
+        memory_space->write(nvmeq->dbbuf_cq_db, &head, sizeof(head));
+    else
+        link->writel(nvmeq->q_db + 4 * db_stride, head);
 }
 
 void NVMeDriver::submit_sq_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
@@ -281,6 +308,20 @@ NVMeDriver::NVMeStatus NVMeDriver::set_queue_count(int& count)
     }
 
     return NVME_SC_SUCCESS;
+}
+
+void NVMeDriver::dbbuf_config()
+{
+    struct nvme_command c;
+    NVMeStatus status;
+
+    memset(&c, 0, sizeof(c));
+    c.common.opcode = nvme_admin_dbbuf;
+    c.common.dptr.prp1 = endian::native_to_little(dbbuf_dbs);
+
+    status = submit_sync_command(queues[0].get(), &c, nullptr);
+
+    if (status) throw DeviceIOError("Failed to set dbbuf on device");
 }
 
 void NVMeDriver::setup_admin_queue()

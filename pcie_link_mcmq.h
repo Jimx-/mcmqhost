@@ -17,7 +17,7 @@
 
 class PCIeLinkMcmq : public PCIeLink {
 public:
-    PCIeLinkMcmq() : sock_fd(-1), peer_fd(-1), event_fd(-1) {}
+    PCIeLinkMcmq() : sock_fd(-1), peer_fd(-1) {}
 
     virtual bool init();
 
@@ -28,7 +28,7 @@ public:
     void wait_for_device_ready();
 
 private:
-    int sock_fd, peer_fd, event_fd;
+    int sock_fd, peer_fd;
     std::mutex mutex, sock_mutex;
     std::atomic<uint32_t> read_id_counter;
 

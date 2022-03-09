@@ -42,7 +42,8 @@ public:
     };
 
     explicit NVMeDriver(unsigned ncpus, unsigned int io_queue_depth,
-                        PCIeLink* link, MemorySpace* memory_space);
+                        PCIeLink* link, MemorySpace* memory_space,
+                        bool use_dbbuf = false);
 
     void start(const mcmq::SsdConfig& config);
 
@@ -74,6 +75,8 @@ private:
 
         MemorySpace::Address sq_dma_addr;
         MemorySpace::Address cq_dma_addr;
+        MemorySpace::Address dbbuf_sq_db;
+        MemorySpace::Address dbbuf_cq_db;
         unsigned int depth;
         unsigned char sqe_shift;
         uint16_t qid;
@@ -127,6 +130,7 @@ private:
     int queue_depth;
     int io_queue_depth;
     int db_stride;
+    MemorySpace::Address dbbuf_dbs;
 
     void reset();
 
@@ -150,6 +154,8 @@ private:
     AsyncCommand* submit_async_command(NVMeQueue* nvmeq,
                                        struct nvme_command* cmd,
                                        AsyncCommandCallback&& callback);
+
+    void dbbuf_config();
 
     NVMeDriver::NVMeStatus nvme_features(uint8_t op, unsigned int fid,
                                          unsigned int dword11,
