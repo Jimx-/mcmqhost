@@ -239,7 +239,7 @@ void ResultExporter::export_result(const std::string& filename,
 
     export_sim_result(root, sim_result);
 
-    std::cout << std::setw(4) << root << std::endl;
+    // std::cout << std::setw(4) << root << std::endl;
 
     std::ofstream os(filename);
     os << root;

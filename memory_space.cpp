@@ -131,6 +131,8 @@ void MemorySpace::free_pages(Address addr, size_t len)
 
 void MemorySpace::read(Address addr, void* buf, size_t len)
 {
+    spdlog::trace("MemorySpace::read({:#x}, {}, {})", addr, buf, len);
+
     addr -= iova_base;
     assert(addr < map_size && addr + len <= map_size);
     ::memcpy(buf, (char*)map_base + addr, len);
@@ -138,6 +140,8 @@ void MemorySpace::read(Address addr, void* buf, size_t len)
 
 void MemorySpace::write(Address addr, const void* buf, size_t len)
 {
+    spdlog::trace("MemorySpace::write({:#x}, {}, {})", addr, buf, len);
+
     addr -= iova_base;
     assert(addr < map_size && addr + len <= map_size);
     ::memcpy((char*)map_base + addr, buf, len);
@@ -145,6 +149,8 @@ void MemorySpace::write(Address addr, const void* buf, size_t len)
 
 void MemorySpace::memset(Address addr, int c, size_t len)
 {
+    spdlog::trace("MemorySpace::memset({:#x}, {}, {})", addr, c, len);
+
     addr -= iova_base;
     assert(addr < map_size && addr + len <= map_size);
     ::memset((char*)map_base + addr, c, len);
@@ -177,4 +183,24 @@ SharedMemorySpace::SharedMemorySpace(const fs::path& filename)
                  map_size >> 20);
 
     free(0x1000, file_size - 0x1000);
+}
+
+VfioMemorySpace::VfioMemorySpace(Address iova_base, size_t size)
+    : MemorySpace(iova_base)
+{
+    void* base = ::mmap(NULL, size, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (base == MAP_FAILED) {
+        spdlog::error("Error mapping shared memory file: {}",
+                      ::strerror(errno));
+        throw std::runtime_error("");
+    }
+
+    map_base = base;
+    map_size = size;
+
+    spdlog::info("Mapped DMA memory base={} size={}MB", map_base,
+                 map_size >> 20);
+
+    free(iova_base, iova_base + map_size);
 }

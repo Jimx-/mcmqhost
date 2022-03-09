@@ -38,6 +38,7 @@ include_directories(${PROTOBUF_INCLUDE_DIRS}
 set(SOURCE_FILES
     pcie_link.cpp
     pcie_link_mcmq.cpp
+    pcie_link_vfio.cpp
     memory_space.cpp
     nvme_driver.cpp
     config_reader.cpp

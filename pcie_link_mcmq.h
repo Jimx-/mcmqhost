@@ -1,9 +1,6 @@
 #ifndef _PCIE_LINK_MCMQ_H_
 #define _PCIE_LINK_MCMQ_H_
 
-#include "sim_result.pb.h"
-#include "ssd_config.pb.h"
-
 #include "pcie_link.h"
 
 #include <atomic>
@@ -21,11 +18,11 @@ public:
 
     virtual bool init();
 
+    virtual void map_dma(const MemorySpace& mem_space) {}
+
     void send_config(const mcmq::SsdConfig& config);
 
     void report(mcmq::SimResult& result);
-
-    void wait_for_device_ready();
 
 private:
     int sock_fd, peer_fd, event_fd;

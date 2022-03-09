@@ -24,6 +24,10 @@ public:
     void write(Address addr, const void* buf, size_t len);
     void memset(Address addr, int c, size_t len);
 
+    void* get_map_base() const { return map_base; }
+    size_t get_map_size() const { return map_size; }
+    Address get_iova_base() const { return iova_base; }
+
 protected:
     void* map_base;
     size_t map_size;
@@ -53,6 +57,14 @@ private:
 class SharedMemorySpace : public MemorySpace {
 public:
     explicit SharedMemorySpace(const std::filesystem::path& filename);
+
+private:
+    std::filesystem::path filename;
+};
+
+class VfioMemorySpace : public MemorySpace {
+public:
+    explicit VfioMemorySpace(Address iova_base, size_t map_size);
 
 private:
     std::filesystem::path filename;

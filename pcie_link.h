@@ -1,6 +1,7 @@
 #ifndef _PCIE_LINK_H_
 #define _PCIE_LINK_H_
 
+#include "memory_space.h"
 #include "sim_result.pb.h"
 #include "ssd_config.pb.h"
 
@@ -28,6 +29,8 @@ public:
     {
         irq_handler = handler;
     }
+
+    virtual void map_dma(const MemorySpace& mem_space) = 0;
 
     virtual void send_config(const mcmq::SsdConfig& config) = 0;
 

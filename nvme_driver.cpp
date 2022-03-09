@@ -39,7 +39,7 @@ NVMeDriver::NVMeStatus NVMeDriver::AsyncCommand::wait(NVMeResult* resp)
 NVMeDriver::NVMeDriver(unsigned ncpus, unsigned int io_queue_depth,
                        PCIeLink* link, MemorySpace* memory_space)
     : ncpus(ncpus), io_queue_depth(io_queue_depth), link(link),
-      memory_space(memory_space)
+      memory_space(memory_space), queue_count(0), online_queues(0)
 {}
 
 void NVMeDriver::set_thread_id(unsigned int thread_id)

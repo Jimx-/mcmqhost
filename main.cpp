@@ -3,6 +3,7 @@
 #include "memory_space.h"
 #include "nvme_driver.h"
 #include "pcie_link_mcmq.h"
+#include "pcie_link_vfio.h"
 #include "result_exporter.h"
 
 #include "cxxopts.hpp"
@@ -29,6 +30,10 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
             cxxopts::value<std::string>()->default_value("workload.yaml"))
             ("r,result", "Path to the result file",
             cxxopts::value<std::string>()->default_value("result.json"))
+            ("g,group", "VFIO group",
+            cxxopts::value<std::string>())
+            ("d,device", "PCI device ID",
+            cxxopts::value<std::string>())
             ("h,help", "Print help");
         // clang-format on
 
@@ -92,6 +97,18 @@ int main(int argc, char* argv[])
         memory_space = std::make_unique<SharedMemorySpace>(shared_memory);
         link = std::make_unique<PCIeLinkMcmq>();
     } else if (backend == "vfio") {
+        std::string group, device_id;
+
+        try {
+            group = args["group"].as<std::string>();
+            device_id = args["device"].as<std::string>();
+        } catch (const OptionException& e) {
+            spdlog::error("Failed to parse options: {}", e.what());
+            exit(EXIT_FAILURE);
+        }
+
+        memory_space = std::make_unique<VfioMemorySpace>(0x1000, 1024 * 1024);
+        link = std::make_unique<PCIeLinkVfio>(group, device_id);
     } else {
         spdlog::error("Unknown backend type: {}", backend);
         return EXIT_FAILURE;
@@ -102,6 +119,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+    link->map_dma(*memory_space);
     link->start();
 
     NVMeDriver driver(host_config.flows.size(), host_config.io_queue_depth,
