@@ -2,7 +2,7 @@
 #include "io_thread_synthetic.h"
 #include "memory_space.h"
 #include "nvme_driver.h"
-#include "pcie_link.h"
+#include "pcie_link_mcmq.h"
 #include "result_exporter.h"
 
 #include "cxxopts.hpp"
@@ -20,6 +20,7 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
 
         // clang-format off
         options.add_options()
+            ("b,backend", "Backend type", cxxopts::value<std::string>()->default_value("mcmq"))
             ("m,memory", "Path to the shared memory file",
             cxxopts::value<std::string>()->default_value("/dev/shm/ivshmem"))
             ("c,config", "Path to the SSD config file",
@@ -50,10 +51,10 @@ int main(int argc, char* argv[])
 
     auto args = parse_arguments(argc, argv);
 
-    std::string shared_memory;
+    std::string backend;
     std::string config_file, workload_file, result_file;
     try {
-        shared_memory = args["memory"].as<std::string>();
+        backend = args["backend"].as<std::string>();
         config_file = args["config"].as<std::string>();
         workload_file = args["workload"].as<std::string>();
         result_file = args["result"].as<std::string>();
@@ -75,18 +76,36 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
-    MemorySpace memory_space(shared_memory);
+    std::unique_ptr<MemorySpace> memory_space;
+    std::unique_ptr<PCIeLink> link;
 
-    PCIeLink link;
-    if (!link.init()) {
+    if (backend == "mcmq") {
+        std::string shared_memory;
+
+        try {
+            shared_memory = args["memory"].as<std::string>();
+        } catch (const OptionException& e) {
+            spdlog::error("Failed to parse options: {}", e.what());
+            exit(EXIT_FAILURE);
+        }
+
+        memory_space = std::make_unique<SharedMemorySpace>(shared_memory);
+        link = std::make_unique<PCIeLinkMcmq>();
+    } else if (backend == "vfio") {
+    } else {
+        spdlog::error("Unknown backend type: {}", backend);
+        return EXIT_FAILURE;
+    }
+
+    if (!link->init()) {
         spdlog::error("Failed to initialize PCIe link");
         return EXIT_FAILURE;
     }
 
-    link.start();
+    link->start();
 
     NVMeDriver driver(host_config.flows.size(), host_config.io_queue_depth,
-                      &link, &memory_space);
+                      link.get(), memory_space.get());
     driver.start(ssd_config);
 
     int thread_id = 1;
@@ -123,7 +142,7 @@ int main(int argc, char* argv[])
 
     ResultExporter::export_result(result_file, host_result, sim_result);
 
-    link.stop();
+    link->stop();
 
     return 0;
 }

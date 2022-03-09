@@ -10,31 +10,8 @@ namespace fs = std::filesystem;
 #define roundup(x, align) \
     (((x) % align == 0) ? (x) : (((x) + align) - ((x) % align)))
 
-MemorySpace::MemorySpace(const fs::path& filename) : filename(filename)
+MemorySpace::MemorySpace(Address iova_base) : iova_base(iova_base)
 {
-    auto file_size = fs::file_size(filename);
-
-    int fd = ::open(filename.c_str(), O_RDWR);
-    if (fd == -1) {
-        spdlog::error("Error opening shared memory file: {}",
-                      ::strerror(errno));
-        throw std::runtime_error("");
-    }
-
-    void* base =
-        ::mmap(NULL, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (base == MAP_FAILED) {
-        spdlog::error("Error mapping shared memory file: {}",
-                      ::strerror(errno));
-        throw std::runtime_error("");
-    }
-
-    map_base = base;
-    map_size = file_size;
-
-    spdlog::info("Mapped shared memory file base={} size={}MB", map_base,
-                 map_size >> 20);
-
     struct hole* hp;
 
     for (hp = &hole[0]; hp < &hole[NR_HOLES]; hp++) {
@@ -45,8 +22,6 @@ MemorySpace::MemorySpace(const fs::path& filename) : filename(filename)
     hole[NR_HOLES - 1].h_next = NULL;
     hole_head = NULL;
     free_slots = &hole[0];
-
-    free(0x1000, file_size - 0x1000);
 }
 
 void MemorySpace::delete_slot(struct hole* prev_ptr, struct hole* hp)
@@ -156,17 +131,50 @@ void MemorySpace::free_pages(Address addr, size_t len)
 
 void MemorySpace::read(Address addr, void* buf, size_t len)
 {
+    addr -= iova_base;
     assert(addr < map_size && addr + len <= map_size);
     ::memcpy(buf, (char*)map_base + addr, len);
 }
 
 void MemorySpace::write(Address addr, const void* buf, size_t len)
 {
+    addr -= iova_base;
     assert(addr < map_size && addr + len <= map_size);
     ::memcpy((char*)map_base + addr, buf, len);
 }
 
 void MemorySpace::memset(Address addr, int c, size_t len)
 {
+    addr -= iova_base;
+    assert(addr < map_size && addr + len <= map_size);
     ::memset((char*)map_base + addr, c, len);
+}
+
+SharedMemorySpace::SharedMemorySpace(const fs::path& filename)
+    : MemorySpace(0), filename(filename)
+{
+    auto file_size = fs::file_size(filename);
+
+    int fd = ::open(filename.c_str(), O_RDWR);
+    if (fd == -1) {
+        spdlog::error("Error opening shared memory file: {}",
+                      ::strerror(errno));
+        throw std::runtime_error("");
+    }
+
+    void* base =
+        ::mmap(NULL, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (base == MAP_FAILED) {
+        spdlog::error("Error mapping shared memory file: {}",
+                      ::strerror(errno));
+        throw std::runtime_error("");
+    }
+
+    map_base = base;
+    map_size = file_size;
+
+    spdlog::info("Mapped shared memory file base={} size={}MB", map_base,
+                 map_size >> 20);
+
+    free(0x1000, file_size - 0x1000);
 }

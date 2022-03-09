@@ -15,12 +15,12 @@
 
 class PCIeLink {
 public:
-    PCIeLink()
-        : sock_fd(-1), peer_fd(-1), event_fd(-1), stopped(false),
-          device_ready(false)
-    {}
+    PCIeLink() : event_fd(-1), stopped(false), device_ready(false) {}
 
-    bool init();
+    virtual ~PCIeLink() {}
+
+    virtual bool init() = 0;
+
     void start();
     void stop();
 
@@ -29,64 +29,58 @@ public:
         irq_handler = handler;
     }
 
-    size_t read_from_device(uint64_t addr, void* buf, size_t buflen);
+    virtual void send_config(const mcmq::SsdConfig& config) = 0;
 
-    void write_to_device(uint64_t addr, const void* buf, size_t len)
-    {
-        send_message(MessageType::WRITE_REQ, addr, buf, len);
-    }
-
-    void send_config(const mcmq::SsdConfig& config);
-
-    void report(mcmq::SimResult& result);
+    virtual void report(mcmq::SimResult& result) = 0;
 
     void wait_for_device_ready();
 
-private:
-    int sock_fd, peer_fd, event_fd;
-    std::mutex mutex, sock_mutex;
+    uint32_t readl(uint64_t addr)
+    {
+        uint32_t val;
+        read_from_device(addr, &val, sizeof(val));
+        return val;
+    }
+
+    void writel(uint64_t addr, uint32_t val)
+    {
+        write_to_device(addr, &val, sizeof(val));
+    }
+
+    uint64_t readq(uint64_t addr)
+    {
+        uint64_t val;
+        read_from_device(addr, &val, sizeof(val));
+        return val;
+    }
+
+    void writeq(uint64_t addr, uint64_t val)
+    {
+        write_to_device(addr, &val, sizeof(val));
+    }
+
+protected:
+    int event_fd;
     std::atomic<bool> stopped;
-    std::atomic<uint32_t> read_id_counter;
-    std::thread io_thread;
     std::function<void(uint16_t)> irq_handler;
+
+    virtual void recv_thread() = 0;
+
+    virtual size_t read_from_device(uint64_t addr, void* buf,
+                                    size_t buflen) = 0;
+    virtual void write_to_device(uint64_t addr, const void* buf,
+                                 size_t len) = 0;
+
+    void set_ready()
+    {
+        device_ready = true;
+        device_ready_cv.notify_all();
+    }
+
+private:
+    std::thread io_thread;
     bool device_ready;
     std::condition_variable device_ready_cv;
-
-    std::vector<uint8_t> result_buf;
-    size_t result_len;
-    bool result_ready;
-    std::condition_variable result_cv;
-
-    enum class MessageType {
-        READ_REQ = 1,
-        WRITE_REQ = 2,
-        READ_COMP = 3,
-        IRQ = 4,
-        DEV_READY = 5,
-        REPORT = 6,
-        RESULT = 7,
-    };
-
-    struct ReadRequest {
-        std::mutex mutex;
-        std::condition_variable cv;
-
-        uint32_t id;
-        void* buf;
-        size_t buflen;
-        size_t len;
-        bool completed;
-    };
-
-    std::unordered_map<uint32_t, std::unique_ptr<ReadRequest>> read_requests;
-
-    void send_message(MessageType type, uint64_t addr, const void* buf,
-                      size_t len);
-
-    void recv_thread();
-
-    ReadRequest* setup_read_request(void* buf, size_t buflen);
-    void complete_read_request(uint32_t id, const void* buf, size_t len);
 };
 
 #endif

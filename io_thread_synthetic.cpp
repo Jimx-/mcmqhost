@@ -29,7 +29,7 @@ void IOThreadSynthetic::generate_request(bool& do_write, loff_t& pos,
     int size_sectors;
     std::bernoulli_distribution request_type_dist(read_ratio);
 
-    do_write = request_type_dist(generator);
+    do_write = !request_type_dist(generator);
 
     switch (request_size_distribution) {
     case RequestSizeDistribution::CONSTANT:

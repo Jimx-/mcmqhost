@@ -100,7 +100,7 @@ void NVMeDriver::init_queue(unsigned qid)
 
 void NVMeDriver::reset()
 {
-    link->read_from_device(NVME_REG_CAP, &ctrl_cap, sizeof(ctrl_cap));
+    ctrl_cap = link->readq(NVME_REG_CAP);
 
     queue_depth = std::min((int)(NVME_CAP_MQES(ctrl_cap) + 1), io_queue_depth);
     db_stride = 1 << NVME_CAP_STRIDE(ctrl_cap);
@@ -118,7 +118,7 @@ void NVMeDriver::wait_ready(bool enabled)
     uint32_t csts, bit = enabled ? NVME_CSTS_RDY : 0;
 
     while (true) {
-        link->read_from_device(NVME_REG_CSTS, &csts, sizeof(csts));
+        csts = link->readl(NVME_REG_CSTS);
 
         if (csts == ~0) {
             throw DeviceIOError("Bad CSTS register value from device");
@@ -133,7 +133,7 @@ void NVMeDriver::disable_controller()
     ctrl_config &= ~NVME_CC_SHN_MASK;
     ctrl_config &= ~NVME_CC_ENABLE;
 
-    link->write_to_device(NVME_REG_CC, &ctrl_config, sizeof(ctrl_config));
+    link->writel(NVME_REG_CC, ctrl_config);
 
     wait_ready(false);
 }
@@ -142,7 +142,7 @@ void NVMeDriver::enable_controller()
 {
     unsigned dev_page_min, page_shift = 12;
 
-    link->read_from_device(NVME_REG_CAP, &ctrl_cap, sizeof(ctrl_cap));
+    ctrl_cap = link->readq(NVME_REG_CAP);
     dev_page_min = NVME_CAP_MPSMIN(ctrl_cap) + 12;
 
     if (page_shift < dev_page_min) {
@@ -157,7 +157,7 @@ void NVMeDriver::enable_controller()
     ctrl_config |= NVME_CC_IOSQES | NVME_CC_IOCQES;
     ctrl_config |= NVME_CC_ENABLE;
 
-    link->write_to_device(NVME_REG_CC, &ctrl_config, sizeof(ctrl_config));
+    link->writel(NVME_REG_CC, ctrl_config);
 
     wait_ready(true);
 }
@@ -199,14 +199,14 @@ void NVMeDriver::write_sq_doorbell(NVMeQueue* nvmeq, bool write_sq)
     }
 
     tail = nvmeq->sq_tail;
-    link->write_to_device(nvmeq->q_db, &tail, sizeof(tail));
+    link->writel(nvmeq->q_db, tail);
     nvmeq->last_sq_tail = nvmeq->sq_tail;
 }
 
 void NVMeDriver::ring_cq_doorbell(NVMeQueue* nvmeq)
 {
     uint32_t head = nvmeq->cq_head;
-    link->write_to_device(nvmeq->q_db + 4 * db_stride, &head, sizeof(head));
+    link->writel(nvmeq->q_db + 4 * db_stride, head);
 }
 
 void NVMeDriver::submit_sq_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
@@ -296,9 +296,9 @@ void NVMeDriver::setup_admin_queue()
     uint64_t asq = nvmeq->sq_dma_addr;
     uint64_t acq = nvmeq->cq_dma_addr;
 
-    link->write_to_device((uint64_t)NVME_REG_AQA, &aqa, sizeof(aqa));
-    link->write_to_device((uint64_t)NVME_REG_ASQ, &asq, sizeof(asq));
-    link->write_to_device((uint64_t)NVME_REG_ACQ, &acq, sizeof(acq));
+    link->writel((uint64_t)NVME_REG_AQA, aqa);
+    link->writeq((uint64_t)NVME_REG_ASQ, asq);
+    link->writeq((uint64_t)NVME_REG_ACQ, acq);
 
     enable_controller();
 
