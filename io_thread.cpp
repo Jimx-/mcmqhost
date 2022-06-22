@@ -3,11 +3,11 @@
 
 #include "spdlog/spdlog.h"
 
-IOThread::IOThread(NVMeDriver* driver, int thread_id, unsigned int queue_depth,
-                   size_t request_count)
-    : driver(driver), thread_id(thread_id), queue_depth(queue_depth),
-      request_count(request_count), nr_submitted_requests(0),
-      nr_completed_requests(0), inflight_requests(0),
+IOThread::IOThread(NVMeDriver* driver, MemorySpace* memory_space, int thread_id,
+                   unsigned int queue_depth, size_t request_count)
+    : driver(driver), memory_space(memory_space), thread_id(thread_id),
+      queue_depth(queue_depth), request_count(request_count),
+      nr_submitted_requests(0), nr_completed_requests(0), inflight_requests(0),
       nr_completed_read_requests(0), nr_completed_write_requests(0),
       transferred_bytes_total(0), transferred_bytes_read(0),
       transferred_bytes_write(0)
@@ -16,15 +16,16 @@ IOThread::IOThread(NVMeDriver* driver, int thread_id, unsigned int queue_depth,
 }
 
 std::unique_ptr<IOThread>
-IOThread::create_thread(NVMeDriver* driver, int thread_id,
-                        unsigned int queue_depth, size_t sector_size,
-                        size_t max_lsa, const FlowDefinition& def)
+IOThread::create_thread(NVMeDriver* driver, MemorySpace* memory_space,
+                        int thread_id, unsigned int queue_depth,
+                        size_t sector_size, size_t max_lsa,
+                        const FlowDefinition& def)
 {
     switch (def.type) {
     case FlowType::SYNTHETIC:
         return std::make_unique<IOThreadSynthetic>(
-            driver, thread_id, def.nsid, queue_depth, sector_size, max_lsa,
-            def.synthetic.seed, def.synthetic.request_count,
+            driver, memory_space, thread_id, def.nsid, queue_depth, sector_size,
+            max_lsa, def.synthetic.seed, def.synthetic.request_count,
             def.synthetic.read_ratio, def.synthetic.request_size_distribution,
             def.synthetic.request_size_mean,
             def.synthetic.request_size_variance,
@@ -86,6 +87,7 @@ void IOThread::submit_io_request(bool do_write, unsigned int nsid, loff_t pos,
     req->do_write = do_write;
     req->nsid = nsid;
     req->pos = pos;
+    req->buf = memory_space->allocate_pages(size);
     req->size = size;
 
     nr_submitted_requests++;
@@ -120,9 +122,9 @@ void IOThread::submit_to_device(IORequest* req)
     req->enqueued_time = std::chrono::system_clock::now();
 
     if (do_write) {
-        driver->write_async(nsid, pos, size, std::move(callback));
+        driver->write_async(nsid, pos, req->buf, size, std::move(callback));
     } else {
-        driver->read_async(nsid, pos, size, std::move(callback));
+        driver->read_async(nsid, pos, req->buf, size, std::move(callback));
     }
 }
 
@@ -175,6 +177,8 @@ void IOThread::process_completed_request(IORequest* req)
     inflight_requests--;
     nr_completed_requests++;
     transferred_bytes_total += req->size;
+
+    memory_space->free(req->buf, req->size);
 
     if (nr_completed_requests % LOG_STEP == 0)
         spdlog::info("Thread {} {}/{} requests completed", thread_id,

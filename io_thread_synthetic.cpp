@@ -4,15 +4,15 @@
 #include "spdlog/spdlog.h"
 
 IOThreadSynthetic::IOThreadSynthetic(
-    NVMeDriver* driver, int thread_id, unsigned int nsid,
-    unsigned int queue_depth, unsigned int sector_size, size_t max_lsa,
-    unsigned int seed, size_t request_count, double read_ratio,
+    NVMeDriver* driver, MemorySpace* memory_space, int thread_id,
+    unsigned int nsid, unsigned int queue_depth, unsigned int sector_size,
+    size_t max_lsa, unsigned int seed, size_t request_count, double read_ratio,
     RequestSizeDistribution request_size_distribution, int request_size_mean,
     int request_size_variance, AddressDistribution addr_distribution,
     double zipfian_alpha, unsigned int addr_alignment,
     unsigned int average_enqueued_requests)
-    : IOThread(driver, thread_id, queue_depth, request_count), nsid(nsid),
-      sector_size(sector_size), max_lsa(max_lsa), generator(seed),
+    : IOThread(driver, memory_space, thread_id, queue_depth, request_count),
+      nsid(nsid), sector_size(sector_size), max_lsa(max_lsa), generator(seed),
       read_ratio(read_ratio),
       request_size_distribution(request_size_distribution),
       request_size_mean(request_size_mean),

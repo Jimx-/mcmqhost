@@ -27,18 +27,26 @@ public:
         friend class NVMeDriver;
 
     public:
+        ~AsyncCommand()
+        {
+            for (auto&& prp : prp_lists)
+                space->free(prp, 0x1000);
+        }
+
         NVMeStatus wait(NVMeResult* resp);
 
     private:
         std::mutex mutex;
         std::condition_variable cv;
         NVMeDriver* driver;
+        MemorySpace* space;
 
         uint16_t id;
         NVMeStatus status;
         NVMeResult result;
         bool completed;
         AsyncCommandCallback callback;
+        std::vector<MemorySpace::Address> prp_lists;
     };
 
     explicit NVMeDriver(unsigned ncpus, unsigned int io_queue_depth,
@@ -49,23 +57,29 @@ public:
 
     void set_thread_id(unsigned int thread_id);
 
-    void read(unsigned int nsid, loff_t pos, size_t size);
+    void read(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
+              size_t size);
 
-    void write(unsigned int nsid, loff_t pos, size_t size);
+    void write(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
+               size_t size);
 
-    void read_async(unsigned int nsid, loff_t pos, size_t size,
-                    AsyncCommandCallback&& callback)
+    void read_async(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
+                    size_t size, AsyncCommandCallback&& callback)
     {
-        (void)submit_rw_command(false, nsid, pos, size, std::move(callback));
+        (void)submit_rw_command(false, nsid, pos, buf, size,
+                                std::move(callback));
     }
 
-    void write_async(unsigned int nsid, loff_t pos, size_t size,
-                     AsyncCommandCallback&& callback)
+    void write_async(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
+                     size_t size, AsyncCommandCallback&& callback)
     {
-        (void)submit_rw_command(true, nsid, pos, size, std::move(callback));
+        (void)submit_rw_command(true, nsid, pos, buf, size,
+                                std::move(callback));
     }
 
     void report(mcmq::SimResult& result) { link->report(result); }
+
+    void shutdown();
 
 private:
     static constexpr unsigned AQ_DEPTH = 32;
@@ -144,15 +158,20 @@ private:
     AsyncCommand* setup_async_command(AsyncCommandCallback&& callback);
     void remove_async_command(uint16_t command_id);
 
+    void setup_buffer(AsyncCommand* acmd, struct nvme_command* cmd,
+                      MemorySpace::Address buf, size_t buflen);
+
     void write_sq_doorbell(NVMeQueue* nvmeq, bool write_sq);
     void ring_cq_doorbell(NVMeQueue* nvmeq);
 
     void submit_sq_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
                            bool write_sq);
     NVMeStatus submit_sync_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
+                                   MemorySpace::Address buf, size_t buflen,
                                    union nvme_completion::nvme_result* result);
     AsyncCommand* submit_async_command(NVMeQueue* nvmeq,
                                        struct nvme_command* cmd,
+                                       MemorySpace::Address buf, size_t buflen,
                                        AsyncCommandCallback&& callback);
 
     void dbbuf_config();
@@ -175,12 +194,15 @@ private:
     NVMeStatus create_cq(NVMeQueue* nvmeq, unsigned qid, unsigned int vector);
     NVMeStatus create_sq(NVMeQueue* nvmeq, unsigned qid);
 
+    NVMeStatus identify_controller();
+
     bool cqe_pending(NVMeQueue* nvmeq);
     void handle_cqe(NVMeQueue* nvmeq, uint16_t idx);
     void nvme_irq(NVMeQueue* nvmeq);
 
     AsyncCommand* submit_rw_command(bool do_write, unsigned int nsid,
-                                    loff_t pos, size_t size,
+                                    loff_t pos, MemorySpace::Address buf,
+                                    size_t size,
                                     AsyncCommandCallback&& callback);
 };
 

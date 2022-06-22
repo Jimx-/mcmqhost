@@ -124,6 +124,8 @@ void NVMeDriver::reset()
 
     setup_admin_queue();
 
+    identify_controller();
+
     setup_io_queues();
 
     if (dbbuf_dbs) {
@@ -154,6 +156,14 @@ void NVMeDriver::disable_controller()
     link->writel(NVME_REG_CC, ctrl_config);
 
     wait_ready(false);
+}
+
+void NVMeDriver::shutdown()
+{
+    ctrl_config &= ~NVME_CC_SHN_MASK;
+    ctrl_config |= NVME_CC_SHN_NORMAL;
+
+    link->writel(NVME_REG_CC, ctrl_config);
 }
 
 void NVMeDriver::enable_controller()
@@ -189,6 +199,7 @@ NVMeDriver::setup_async_command(AsyncCommandCallback&& callback)
     auto it = command_map.emplace(id, std::make_unique<AsyncCommand>()).first;
     auto& cmd = it->second;
     cmd->driver = this;
+    cmd->space = memory_space;
     cmd->id = id;
     cmd->completed = false;
     cmd->callback = callback;
@@ -200,6 +211,64 @@ void NVMeDriver::remove_async_command(uint16_t command_id)
 {
     std::lock_guard<std::mutex> guard(command_mutex);
     command_map.erase(command_id);
+}
+
+void NVMeDriver::setup_buffer(AsyncCommand* acmd, struct nvme_command* cmd,
+                              MemorySpace::Address buf, size_t buflen)
+{
+    auto offset = buf % ctrl_page_size;
+
+    if (offset + buflen <= ctrl_page_size * 2) {
+        auto first_prp_len = ctrl_page_size - offset;
+
+        cmd->common.dptr.prp1 = endian::native_to_little(buf);
+        if (buflen > first_prp_len)
+            cmd->common.dptr.prp2 =
+                endian::native_to_little(buf + first_prp_len);
+
+        return;
+    }
+
+    unsigned long prp1, prp2;
+
+    prp1 = buf;
+
+    buflen -= ctrl_page_size - offset;
+    buf += ctrl_page_size - offset;
+
+    auto prp_list = memory_space->allocate_pages(ctrl_page_size);
+    acmd->prp_lists.push_back(prp_list);
+
+    prp2 = prp_list;
+
+    int i = 0;
+    for (;;) {
+        if (i == ctrl_page_size >> 3) {
+            auto old_prp_list = prp_list;
+            uint64_t last_entry;
+
+            prp_list = memory_space->allocate_pages(ctrl_page_size);
+            acmd->prp_lists.push_back(prp_list);
+
+            memory_space->read(old_prp_list + (i - 1) * sizeof(uint64_t),
+                               &last_entry, sizeof(last_entry));
+            memory_space->write(prp_list, &last_entry, sizeof(last_entry));
+            last_entry = endian::native_to_little(prp_list);
+            memory_space->write(old_prp_list + (i - 1) * sizeof(uint64_t),
+                                &last_entry, sizeof(last_entry));
+        }
+
+        uint64_t val = endian::native_to_little(buf);
+        memory_space->write(prp_list + i * sizeof(uint64_t), &val, sizeof(val));
+        i++;
+        buf += ctrl_page_size;
+
+        if (buflen <= ctrl_page_size) break;
+        buflen -= ctrl_page_size;
+    }
+
+    cmd->common.dptr.prp1 = endian::native_to_little(prp1);
+    cmd->common.dptr.prp2 = endian::native_to_little(prp2);
 }
 
 void NVMeDriver::write_sq_doorbell(NVMeQueue* nvmeq, bool write_sq)
@@ -248,11 +317,16 @@ void NVMeDriver::submit_sq_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
 
 NVMeDriver::NVMeStatus
 NVMeDriver::submit_sync_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
+                                MemorySpace::Address buf, size_t buflen,
                                 union nvme_completion::nvme_result* result)
 {
     auto* acmd = setup_async_command({});
 
     cmd->common.command_id = acmd->id;
+
+    if (buflen) {
+        setup_buffer(acmd, cmd, buf, buflen);
+    }
 
     submit_sq_command(nvmeq, cmd, true);
 
@@ -261,11 +335,16 @@ NVMeDriver::submit_sync_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
 
 NVMeDriver::AsyncCommand*
 NVMeDriver::submit_async_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
+                                 MemorySpace::Address buf, size_t buflen,
                                  AsyncCommandCallback&& callback)
 {
     auto* acmd = setup_async_command(std::move(callback));
 
     cmd->common.command_id = acmd->id;
+
+    if (buflen) {
+        setup_buffer(acmd, cmd, buf, buflen);
+    }
 
     submit_sq_command(nvmeq, cmd, true);
 
@@ -285,7 +364,7 @@ NVMeDriver::NVMeStatus NVMeDriver::nvme_features(uint8_t op, unsigned int fid,
     c.features.fid = endian::native_to_little(fid);
     c.features.dword11 = endian::native_to_little(dword11);
 
-    status = submit_sync_command(queues[0].get(), &c, &res);
+    status = submit_sync_command(queues[0].get(), &c, 0, 0, &res);
 
     if (result) *result = endian::little_to_native(res.u32);
     return status;
@@ -319,7 +398,7 @@ void NVMeDriver::dbbuf_config()
     c.common.opcode = nvme_admin_dbbuf;
     c.common.dptr.prp1 = endian::native_to_little(dbbuf_dbs);
 
-    status = submit_sync_command(queues[0].get(), &c, nullptr);
+    status = submit_sync_command(queues[0].get(), &c, 0, 0, nullptr);
 
     if (status) throw DeviceIOError("Failed to set dbbuf on device");
 }
@@ -400,7 +479,7 @@ NVMeDriver::NVMeStatus NVMeDriver::create_cq(NVMeQueue* nvmeq, unsigned qid,
     c.create_cq.cq_flags = endian::native_to_little(flags);
     c.create_cq.irq_vector = endian::native_to_little(vector);
 
-    return submit_sync_command(adminq.get(), &c, nullptr);
+    return submit_sync_command(adminq.get(), &c, 0, 0, nullptr);
 }
 
 NVMeDriver::NVMeStatus NVMeDriver::create_sq(NVMeQueue* nvmeq, unsigned qid)
@@ -417,7 +496,29 @@ NVMeDriver::NVMeStatus NVMeDriver::create_sq(NVMeQueue* nvmeq, unsigned qid)
     c.create_sq.sq_flags = endian::native_to_little(flags);
     c.create_sq.cqid = endian::native_to_little(qid);
 
-    return submit_sync_command(adminq.get(), &c, nullptr);
+    return submit_sync_command(adminq.get(), &c, 0, 0, nullptr);
+}
+
+NVMeDriver::NVMeStatus NVMeDriver::identify_controller()
+{
+    struct nvme_command c = {0};
+    auto& adminq = queues.front();
+    MemorySpace::Address id_buf;
+    static uint8_t cpu_buf[0x1000];
+    int status;
+
+    memset(&c, 0, sizeof(c));
+    c.identify.opcode = nvme_admin_identify;
+    c.identify.cns = NVME_ID_CNS_CTRL;
+
+    id_buf = memory_space->allocate_pages(sizeof(struct nvme_id_ctrl));
+
+    status = submit_sync_command(adminq.get(), &c, id_buf,
+                                 sizeof(struct nvme_id_ctrl), nullptr);
+
+    memory_space->free(id_buf, sizeof(struct nvme_id_ctrl));
+
+    return status;
 }
 
 bool NVMeDriver::cqe_pending(NVMeQueue* nvmeq)
@@ -425,6 +526,7 @@ bool NVMeDriver::cqe_pending(NVMeQueue* nvmeq)
     uint16_t status;
     struct nvme_completion* cqes = nullptr;
 
+    assert(nvmeq->cq_head < nvmeq->depth);
     memory_space->read(nvmeq->cq_dma_addr +
                            ((uintptr_t)&cqes[nvmeq->cq_head].status),
                        &status, sizeof(status));
@@ -437,6 +539,7 @@ void NVMeDriver::handle_cqe(NVMeQueue* nvmeq, uint16_t idx)
     struct nvme_completion cqe;
     uint16_t command_id;
 
+    assert(idx < nvmeq->depth);
     memory_space->read(nvmeq->cq_dma_addr + (idx * sizeof(cqe)), &cqe,
                        sizeof(cqe));
 
@@ -490,7 +593,8 @@ void NVMeDriver::nvme_irq(NVMeQueue* nvmeq)
 
 NVMeDriver::AsyncCommand*
 NVMeDriver::submit_rw_command(bool do_write, unsigned int nsid, loff_t pos,
-                              size_t size, AsyncCommandCallback&& callback)
+                              MemorySpace::Address buf, size_t size,
+                              AsyncCommandCallback&& callback)
 {
     uint16_t control = 0;
     uint32_t dsmgmt = 0;
@@ -502,27 +606,30 @@ NVMeDriver::submit_rw_command(bool do_write, unsigned int nsid, loff_t pos,
     memset(&cmd, 0, sizeof(cmd));
     cmd.rw.opcode = (do_write ? nvme_cmd_write : nvme_cmd_read);
     cmd.rw.nsid = endian::native_to_little(nsid);
-    cmd.rw.slba = endian::native_to_little(pos >> 9);
-    cmd.rw.length = endian::native_to_little((size >> 9) - 1);
+    cmd.rw.slba = endian::native_to_little(pos >> 12);
+    cmd.rw.length = endian::native_to_little((size >> 12) - 1);
 
     cmd.rw.control = endian::native_to_little(control);
     cmd.rw.dsmgmt = endian::native_to_little(dsmgmt);
 
-    return submit_async_command(thread_io_queue, &cmd, std::move(callback));
+    return submit_async_command(thread_io_queue, &cmd, buf, size,
+                                std::move(callback));
 }
 
-void NVMeDriver::read(unsigned int nsid, loff_t pos, size_t size)
+void NVMeDriver::read(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
+                      size_t size)
 {
-    auto cmd = submit_rw_command(false, nsid, pos, size, {});
+    auto cmd = submit_rw_command(false, nsid, pos, buf, size, {});
     auto status = cmd->wait(nullptr);
     if ((status & 0x7ff) == NVME_SC_SUCCESS) return;
 
     throw DeviceIOError("Read command error");
 }
 
-void NVMeDriver::write(unsigned int nsid, loff_t pos, size_t size)
+void NVMeDriver::write(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
+                       size_t size)
 {
-    auto cmd = submit_rw_command(false, nsid, pos, size, {});
+    auto cmd = submit_rw_command(false, nsid, pos, buf, size, {});
     auto status = cmd->wait(nullptr);
     if ((status & 0x7ff) == NVME_SC_SUCCESS) return;
 

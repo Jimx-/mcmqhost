@@ -3,6 +3,7 @@
 
 #include "config_reader.h"
 #include "histogram.h"
+#include "memory_space.h"
 #include "nvme_driver.h"
 
 #include <chrono>
@@ -39,8 +40,8 @@ public:
     virtual ~IOThread() {}
 
     static std::unique_ptr<IOThread>
-    create_thread(NVMeDriver* driver, int thread_id, unsigned int queue_depth,
-                  size_t sector_size, size_t max_lsa,
+    create_thread(NVMeDriver* driver, MemorySpace* memory_space, int thread_id,
+                  unsigned int queue_depth, size_t sector_size, size_t max_lsa,
                   const FlowDefinition& def);
 
     const Stats& get_stats() const { return stats; }
@@ -50,8 +51,8 @@ public:
     void join();
 
 protected:
-    IOThread(NVMeDriver* driver, int thread_id, unsigned int queue_depth,
-             size_t request_count);
+    IOThread(NVMeDriver* driver, MemorySpace* memory_space, int thread_id,
+             unsigned int queue_depth, size_t request_count);
 
     virtual void run_impl() = 0;
 
@@ -81,6 +82,7 @@ private:
         bool do_write;
         unsigned int nsid;
         loff_t pos;
+        MemorySpace::Address buf;
         size_t size;
 
         std::chrono::time_point<std::chrono::system_clock> arrival_time;
@@ -88,6 +90,7 @@ private:
     };
 
     NVMeDriver* driver;
+    MemorySpace* memory_space;
     int thread_id;
     unsigned int queue_depth;
     unsigned int inflight_requests;

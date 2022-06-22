@@ -7,7 +7,8 @@
 
 class IOThreadSynthetic : public IOThread {
 public:
-    IOThreadSynthetic(NVMeDriver* driver, int thread_id, unsigned int nsid,
+    IOThreadSynthetic(NVMeDriver* driver, MemorySpace* memory_space,
+                      int thread_id, unsigned int nsid,
                       unsigned int queue_depth, unsigned int sector_size,
                       size_t max_lsa, unsigned int seed, size_t request_count,
                       double read_ratio,

@@ -107,7 +107,7 @@ int main(int argc, char* argv[])
             exit(EXIT_FAILURE);
         }
 
-        memory_space = std::make_unique<VfioMemorySpace>(0x1000, 1024 * 1024);
+        memory_space = std::make_unique<VfioMemorySpace>(0x1000, 2 * 1024 * 1024);
         link = std::make_unique<PCIeLinkVfio>(group, device_id);
     } else {
         spdlog::error("Unknown backend type: {}", backend);
@@ -139,7 +139,7 @@ int main(int argc, char* argv[])
         const auto& ns = it->second;
 
         io_threads.emplace_back(IOThread::create_thread(
-            &driver, thread_id, host_config.io_queue_depth,
+            &driver, memory_space.get(), thread_id, host_config.io_queue_depth,
             host_config.sector_size, ns.capacity_sects, flow));
 
         thread_id++;
@@ -160,6 +160,7 @@ int main(int argc, char* argv[])
 
     ResultExporter::export_result(result_file, host_result, sim_result);
 
+    driver.shutdown();
     link->stop();
 
     return 0;

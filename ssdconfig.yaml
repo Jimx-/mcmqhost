@@ -14,35 +14,26 @@ block_selection_policy: greedy
 namespaces:
   - channels:
     - 0
-    chips:
-    - 0
     - 1
     - 2
     - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    chips:
+    - 0
     dies:
     - 0
     - 1
     planes:
     - 0
     - 1
-  - channels:
-    - 1
-    chips:
-    - 0
-    - 1
-    - 2
-    - 3
-    dies:
-    - 0
-    - 1
-    planes:
-    - 0
-    - 1    
     
 channel_count: 8
 
 channel:
-  chips_per_channel: 4
+  chips_per_channel: 1
   transfer_rate: 300
   width: 1
 
