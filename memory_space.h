@@ -1,6 +1,7 @@
 #ifndef _DEVICE_ADDRESS_SPACE_H_
 #define _DEVICE_ADDRESS_SPACE_H_
 
+#include <array>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -20,9 +21,9 @@ public:
     void free(Address addr, size_t len);
     void free_pages(Address addr, size_t len);
 
-    void read(Address addr, void* buf, size_t len);
-    void write(Address addr, const void* buf, size_t len);
-    void memset(Address addr, int c, size_t len);
+    virtual void read(Address addr, void* buf, size_t len);
+    virtual void write(Address addr, const void* buf, size_t len);
+    virtual void memset(Address addr, int c, size_t len);
 
     void* get_map_base() const { return map_base; }
     size_t get_map_size() const { return map_size; }
@@ -68,6 +69,15 @@ public:
 
 private:
     std::filesystem::path filename;
+};
+
+class BARMemorySpace : public MemorySpace {
+public:
+    explicit BARMemorySpace(void* base, size_t size);
+
+    virtual void read(Address addr, void* buf, size_t len);
+    virtual void write(Address addr, const void* buf, size_t len);
+    virtual void memset(Address addr, int c, size_t len);
 };
 
 #endif

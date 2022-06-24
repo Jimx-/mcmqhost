@@ -107,7 +107,8 @@ int main(int argc, char* argv[])
             exit(EXIT_FAILURE);
         }
 
-        memory_space = std::make_unique<VfioMemorySpace>(0x1000, 2 * 1024 * 1024);
+        memory_space =
+            std::make_unique<VfioMemorySpace>(0x1000, 2 * 1024 * 1024);
         link = std::make_unique<PCIeLinkVfio>(group, device_id);
     } else {
         spdlog::error("Unknown backend type: {}", backend);
@@ -125,6 +126,14 @@ int main(int argc, char* argv[])
     NVMeDriver driver(host_config.flows.size(), host_config.io_queue_depth,
                       link.get(), memory_space.get(), false);
     driver.start(ssd_config);
+
+    // unsigned int ctx = driver.create_context(
+    //     "/home/jimx/projects/myssd_sdk/libstorpu/libtest.so");
+    // spdlog::info("Created context {}", ctx);
+
+    // driver.set_thread_id(1);
+    // unsigned long a = driver.invoke_function(1, 0xd98, 0);
+    // spdlog::info("Invoke {:#x}", a);
 
     int thread_id = 1;
     std::vector<std::unique_ptr<IOThread>> io_threads;

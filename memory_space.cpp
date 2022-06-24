@@ -226,3 +226,58 @@ VfioMemorySpace::VfioMemorySpace(Address iova_base, size_t size)
 
     free(iova_base, iova_base + map_size);
 }
+
+BARMemorySpace::BARMemorySpace(void* base, size_t size) : MemorySpace(0)
+{
+    map_base = base;
+    map_size = size;
+
+    spdlog::info("Mapped BAR memory base={} size={}MB", map_base,
+                 map_size >> 20);
+
+    free(0, map_size);
+}
+
+void BARMemorySpace::read(Address addr, void* buf, size_t len)
+{
+    spdlog::trace("BARMemorySpace::read({:#x}, {}, {})", addr, buf, len);
+
+    addr -= iova_base;
+    assert(addr < map_size && addr + len <= map_size);
+    assert(!(addr & 0x7) && !(len & 0x7));
+
+    for (size_t i = 0; i < len; i += 8) {
+        *(uint64_t*)((char*)buf + i) = *(uint64_t*)((char*)map_base + addr + i);
+    }
+}
+
+void BARMemorySpace::write(Address addr, const void* buf, size_t len)
+{
+    spdlog::trace("BARMemorySpace::write({:#x}, {}, {})", addr, buf, len);
+
+    addr -= iova_base;
+    assert(addr < map_size && addr + len <= map_size);
+    assert(!(addr & 0x7) && !(len & 0x7));
+
+    for (size_t i = 0; i < len; i += 8) {
+        *(uint64_t*)((char*)map_base + addr + i) = *(uint64_t*)((char*)buf + i);
+    }
+}
+
+void BARMemorySpace::memset(Address addr, int c, size_t len)
+{
+    spdlog::trace("BARMemorySpace::memset({:#x}, {}, {})", addr, c, len);
+
+    addr -= iova_base;
+    assert(addr < map_size && addr + len <= map_size);
+    assert(!(addr & 0x7) && !(len & 0x7));
+
+    uint64_t val = c;
+    val |= val << 8;
+    val |= val << 16;
+    val |= val << 32;
+
+    for (size_t i = 0; i < len; i += 8) {
+        *(uint64_t*)((char*)map_base + addr + i) = val;
+    }
+}

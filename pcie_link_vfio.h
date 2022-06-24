@@ -25,6 +25,8 @@ public:
 
     void map_dma(const MemorySpace& mem_space);
 
+    MemorySpace* map_bar(unsigned int bar_id);
+
     void send_config(const mcmq::SsdConfig& config) {}
 
     void report(mcmq::SimResult& result) {}

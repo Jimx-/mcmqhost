@@ -140,6 +140,23 @@ void PCIeLinkVfio::map_dma(const MemorySpace& mem_space)
     if (r < 0) spdlog::error("Failed to map DMA memory: {}", errno);
 }
 
+MemorySpace* PCIeLinkVfio::map_bar(unsigned int bar_id)
+{
+    size_t bar_size;
+    void* bar_base;
+
+    struct vfio_region_info reg = {.argsz = sizeof(reg)};
+    reg.index = VFIO_PCI_BAR0_REGION_INDEX + bar_id;
+
+    ioctl(device_fd, VFIO_DEVICE_GET_REGION_INFO, &reg);
+
+    bar_size = reg.size;
+    bar_base = mmap(NULL, bar_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                    device_fd, reg.offset);
+
+    return new BARMemorySpace(bar_base, bar_size);
+}
+
 size_t PCIeLinkVfio::read_from_device(uint64_t addr, void* buf, size_t buflen)
 {
     uint32_t lo, hi;

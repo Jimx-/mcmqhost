@@ -4,6 +4,8 @@
 
 #include <boost/endian/conversion.hpp>
 
+#include <fstream>
+
 namespace endian = boost::endian;
 
 #define SQ_SIZE(nvmeq) ((nvmeq)->depth << ((nvmeq)->sqe_shift))
@@ -48,6 +50,8 @@ NVMeDriver::NVMeDriver(unsigned ncpus, unsigned int io_queue_depth,
         spdlog::info("Allocated doorbell buffer at {:#x}", dbbuf_dbs);
     } else
         dbbuf_dbs = 0;
+
+    bar4_mem.reset(link->map_bar(4));
 }
 
 void NVMeDriver::set_thread_id(unsigned int thread_id)
@@ -634,4 +638,73 @@ void NVMeDriver::write(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
     if ((status & 0x7ff) == NVME_SC_SUCCESS) return;
 
     throw DeviceIOError("Read command error");
+}
+
+uint32_t NVMeDriver::create_context(const std::filesystem::path& filename)
+{
+    std::ifstream ifs(filename, std::ios::binary);
+
+    ifs.seekg(0, std::ios::end);
+    size_t length = ifs.tellg();
+    ifs.seekg(0, std::ios::beg);
+
+    size_t alloc_length = (length + 7) & ~0x7;
+    auto buffer = std::make_unique<uint8_t[]>(alloc_length);
+
+    ifs.read((char*)buffer.get(), length);
+
+    auto dev_buf = bar4_mem->allocate(alloc_length);
+    bar4_mem->write(dev_buf, buffer.get(), alloc_length);
+
+    struct nvme_command c = {0};
+    union nvme_completion::nvme_result res;
+    auto& adminq = queues.front();
+
+    memset(&c, 0, sizeof(c));
+    c.common.opcode = nvme_admin_storpu_create_context;
+    c.common.dptr.prp1 = endian::native_to_little((uint64_t)dev_buf);
+
+    auto status = submit_sync_command(adminq.get(), &c, 0, 0, &res);
+
+    bar4_mem->free(dev_buf, alloc_length);
+
+    if ((status & 0x7ff) != NVME_SC_SUCCESS)
+        throw DeviceIOError("Create context error");
+
+    return endian::little_to_native(res.u32);
+}
+
+NVMeDriver::AsyncCommand*
+NVMeDriver::submit_invoke_command(unsigned int cid, MemorySpace::Address entry,
+                                  MemorySpace::Address arg,
+                                  AsyncCommandCallback&& callback)
+{
+    struct nvme_command cmd;
+
+    spdlog::trace("Submitting invoke command cid={} entry={} arg={}", cid,
+                  entry, arg);
+
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.storpu_invoke.opcode = nvme_cmd_storpu_invoke;
+    cmd.storpu_invoke.nsid = endian::native_to_little(0);
+    cmd.storpu_invoke.entry = endian::native_to_little((uint64_t)entry);
+    cmd.storpu_invoke.arg = endian::native_to_little((uint64_t)arg);
+    cmd.storpu_invoke.cid = endian::native_to_little((uint32_t)cid);
+
+    return submit_async_command(thread_io_queue, &cmd, 0, 0,
+                                std::move(callback));
+}
+
+unsigned long NVMeDriver::invoke_function(unsigned int cid,
+                                          MemorySpace::Address entry,
+                                          MemorySpace::Address arg)
+{
+    auto cmd = submit_invoke_command(cid, entry, arg, {});
+    union nvme_completion::nvme_result res;
+    auto status = cmd->wait(&res);
+
+    if ((status & 0x7ff) != NVME_SC_SUCCESS)
+        throw DeviceIOError("Read command error");
+
+    return (unsigned long)endian::little_to_native(res.u64);
 }

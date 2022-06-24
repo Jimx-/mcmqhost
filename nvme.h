@@ -291,6 +291,7 @@ enum nvme_opcode {
     nvme_cmd_resv_report = 0x0e,
     nvme_cmd_resv_acquire = 0x11,
     nvme_cmd_resv_release = 0x15,
+    nvme_cmd_storpu_invoke = 0xa0,
 };
 
 struct nvme_common_command {
@@ -326,6 +327,20 @@ struct nvme_rw_command {
     __le16 appmask;
 };
 
+struct nvme_storpu_invoke_command {
+    __u8 opcode;
+    __u8 flags;
+    __u16 command_id;
+    __le32 nsid;
+    __u64 rsvd2;
+    __le64 metadata;
+    union nvme_data_ptr dptr;
+    __le64 entry;
+    __le64 arg;
+    __le32 cid;
+    __le64 rsvd15;
+};
+
 /* Admin commands */
 
 enum nvme_admin_opcode {
@@ -356,6 +371,7 @@ enum nvme_admin_opcode {
     nvme_admin_security_recv = 0x82,
     nvme_admin_sanitize_nvm = 0x84,
     nvme_admin_get_lba_status = 0x86,
+    nvme_admin_storpu_create_context = 0xa0,
 };
 
 enum {
@@ -486,6 +502,7 @@ struct nvme_command {
         struct nvme_create_cq create_cq;
         struct nvme_create_sq create_sq;
         struct nvme_delete_queue delete_queue;
+        struct nvme_storpu_invoke_command storpu_invoke;
     };
 };
 

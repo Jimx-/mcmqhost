@@ -5,6 +5,7 @@
 #include "nvme.h"
 #include "pcie_link.h"
 
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -81,6 +82,11 @@ public:
 
     void shutdown();
 
+    uint32_t create_context(const std::filesystem::path& filename);
+
+    unsigned long invoke_function(unsigned int cid, MemorySpace::Address entry,
+                                  MemorySpace::Address arg);
+
 private:
     static constexpr unsigned AQ_DEPTH = 32;
 
@@ -146,6 +152,8 @@ private:
     int db_stride;
     MemorySpace::Address dbbuf_dbs;
 
+    std::unique_ptr<MemorySpace> bar4_mem;
+
     void reset();
 
     void allocate_queue(unsigned qid, unsigned depth);
@@ -204,6 +212,11 @@ private:
                                     loff_t pos, MemorySpace::Address buf,
                                     size_t size,
                                     AsyncCommandCallback&& callback);
+
+    AsyncCommand* submit_invoke_command(unsigned int cid,
+                                        MemorySpace::Address entry,
+                                        MemorySpace::Address arg,
+                                        AsyncCommandCallback&& callback);
 };
 
 #endif

@@ -20,6 +20,8 @@ public:
 
     virtual void map_dma(const MemorySpace& mem_space) {}
 
+    virtual MemorySpace* map_bar(unsigned int bar_id) { return nullptr; }
+
     void send_config(const mcmq::SsdConfig& config);
 
     void report(mcmq::SimResult& result);

@@ -32,6 +32,8 @@ public:
 
     virtual void map_dma(const MemorySpace& mem_space) = 0;
 
+    virtual MemorySpace* map_bar(unsigned int bar_id) = 0;
+
     virtual void send_config(const mcmq::SsdConfig& config) = 0;
 
     virtual void report(mcmq::SimResult& result) = 0;
