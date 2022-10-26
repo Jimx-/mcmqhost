@@ -44,9 +44,7 @@ set(SOURCE_FILES
     config_reader.cpp
     result_exporter.cpp
     io_thread.cpp
-    io_thread_synthetic.cpp    
-    main.cpp
-    
+    io_thread_synthetic.cpp
     ${PROTO_SRCS}
 )
 
@@ -63,5 +61,8 @@ set(LIBRARIES
     ${PROTOBUF_LIBRARIES}
 )
     
-add_executable(mcmqhost ${SOURCE_FILES} ${EXT_SOURCE_FILES})
+add_executable(mcmqhost main.cpp ${SOURCE_FILES} ${EXT_SOURCE_FILES})
 target_link_libraries(mcmqhost ${LIBRARIES})
+
+add_executable(loaddata data_loader.cpp ${SOURCE_FILES} ${EXT_SOURCE_FILES})
+target_link_libraries(loaddata ${LIBRARIES})

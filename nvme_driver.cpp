@@ -508,7 +508,6 @@ NVMeDriver::NVMeStatus NVMeDriver::identify_controller()
     struct nvme_command c = {0};
     auto& adminq = queues.front();
     MemorySpace::Address id_buf;
-    static uint8_t cpu_buf[0x1000];
     int status;
 
     memset(&c, 0, sizeof(c));
@@ -620,6 +619,22 @@ NVMeDriver::submit_rw_command(bool do_write, unsigned int nsid, loff_t pos,
                                 std::move(callback));
 }
 
+NVMeDriver::AsyncCommand*
+NVMeDriver::submit_flush_command(unsigned int nsid,
+                                 AsyncCommandCallback&& callback)
+{
+    struct nvme_command cmd;
+
+    spdlog::trace("Submitting flush command nsid={}", nsid);
+
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.rw.opcode = nvme_cmd_flush;
+    cmd.rw.nsid = endian::native_to_little(nsid);
+
+    return submit_async_command(thread_io_queue, &cmd, 0, 0,
+                                std::move(callback));
+}
+
 void NVMeDriver::read(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
                       size_t size)
 {
@@ -637,7 +652,16 @@ void NVMeDriver::write(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
     auto status = cmd->wait(nullptr);
     if ((status & 0x7ff) == NVME_SC_SUCCESS) return;
 
-    throw DeviceIOError("Read command error");
+    throw DeviceIOError("Write command error");
+}
+
+void NVMeDriver::flush(unsigned int nsid)
+{
+    auto cmd = submit_flush_command(nsid, {});
+    auto status = cmd->wait(nullptr);
+    if ((status & 0x7ff) == NVME_SC_SUCCESS) return;
+
+    throw DeviceIOError("Flush command error");
 }
 
 uint32_t NVMeDriver::create_context(const std::filesystem::path& filename)
@@ -707,4 +731,123 @@ unsigned long NVMeDriver::invoke_function(unsigned int cid,
         throw DeviceIOError("Read command error");
 
     return (unsigned long)endian::little_to_native(res.u64);
+}
+
+NVMeDriver::NVMeStatus
+NVMeDriver::submit_ns_mgmt(unsigned int nsid, int sel,
+                           MemorySpace::Address buffer, size_t size,
+                           union nvme_completion::nvme_result* res)
+{
+    struct nvme_command c = {0};
+    auto& adminq = queues.front();
+    int status;
+
+    memset(&c, 0, sizeof(c));
+    c.common.opcode = nvme_admin_ns_mgmt;
+    c.common.nsid = nsid;
+    c.common.cdw10 = sel;
+
+    status = submit_sync_command(adminq.get(), &c, buffer, size, res);
+
+    return status;
+}
+
+unsigned int NVMeDriver::create_namespace(size_t size_bytes)
+{
+    struct nvme_id_ns* id_ns;
+    MemorySpace::Address buffer;
+    union nvme_completion::nvme_result res;
+    int status;
+
+    id_ns = new struct nvme_id_ns;
+    memset(id_ns, 0, sizeof(*id_ns));
+    id_ns->nsze = size_bytes >> 12;
+    id_ns->ncap = size_bytes >> 12;
+
+    buffer = memory_space->allocate_pages(sizeof(*id_ns));
+    memory_space->write(buffer, id_ns, sizeof(*id_ns));
+
+    status = submit_ns_mgmt(0, 0, buffer, sizeof(*id_ns), &res);
+
+    memory_space->free(buffer, sizeof(*id_ns));
+    delete id_ns;
+
+    if ((status & 0x7ff) != NVME_SC_SUCCESS)
+        throw DeviceIOError("Create namespace command error");
+
+    return res.u32;
+}
+
+void NVMeDriver::delete_namespace(unsigned int nsid)
+{
+    int status;
+
+    status = submit_ns_mgmt(nsid, 1, 0, 0, nullptr);
+
+    if ((status & 0x7ff) != NVME_SC_SUCCESS)
+        throw DeviceIOError("Delete namespace command error");
+}
+
+NVMeDriver::NVMeStatus NVMeDriver::submit_ns_attach(unsigned int nsid, int sel,
+                                                    MemorySpace::Address buffer,
+                                                    size_t size)
+{
+    struct nvme_command c = {0};
+    auto& adminq = queues.front();
+    int status;
+
+    memset(&c, 0, sizeof(c));
+    c.common.opcode = nvme_admin_ns_attach;
+    c.common.nsid = nsid;
+    c.common.cdw10 = sel;
+
+    status = submit_sync_command(adminq.get(), &c, buffer, size, nullptr);
+
+    return status;
+}
+
+void NVMeDriver::attach_namespace(unsigned int nsid)
+{
+    uint16_t* ctrl_list;
+    MemorySpace::Address buffer;
+    union nvme_completion::nvme_result res;
+    int status;
+
+    ctrl_list = new uint16_t[0x800];
+    memset(ctrl_list, 0, 0x1000);
+    ctrl_list[0] = 0x1;
+
+    buffer = memory_space->allocate_pages(0x1000);
+    memory_space->write(buffer, ctrl_list, 0x1000);
+
+    status = submit_ns_attach(nsid, 0, buffer, 0x1000);
+
+    memory_space->free(buffer, 0x1000);
+    delete[] ctrl_list;
+
+    if ((status & 0x7ff) != NVME_SC_SUCCESS)
+        throw DeviceIOError("Attach namespace command error");
+}
+
+void NVMeDriver::detach_namespace(unsigned int nsid)
+{
+    uint16_t* ctrl_list;
+    MemorySpace::Address buffer;
+    union nvme_completion::nvme_result res;
+    int status;
+
+    ctrl_list = new uint16_t[0x800];
+    memset(ctrl_list, 0, 0x1000);
+    ctrl_list[0] = 0x1;
+
+    buffer = memory_space->allocate_pages(0x1000);
+    memory_space->write(buffer, ctrl_list, 0x1000);
+
+    status = submit_ns_attach(nsid, 1, buffer, 0x1000);
+
+    memory_space->free(buffer, 0x1000);
+    delete[] ctrl_list;
+
+    if ((status & 0x7ff) != NVME_SC_SUCCESS)
+        throw DeviceIOError("Detach namespace command error");
 }

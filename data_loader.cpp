@@ -10,9 +10,13 @@
 #include "spdlog/cfg/env.h"
 #include "spdlog/spdlog.h"
 
+#include <fstream>
 #include <thread>
 
 using cxxopts::OptionException;
+
+static const size_t CHUNK_SIZE = 256UL << 20;
+static const size_t LOAD_PAGE_SIZE = 0x4000;
 
 cxxopts::ParseResult parse_arguments(int argc, char* argv[])
 {
@@ -26,10 +30,10 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
             cxxopts::value<std::string>()->default_value("/dev/shm/ivshmem"))
             ("c,config", "Path to the SSD config file",
             cxxopts::value<std::string>()->default_value("ssdconfig.yaml"))
-            ("w,workload", "Path to the workload file",
-            cxxopts::value<std::string>()->default_value("workload.yaml"))
             ("r,result", "Path to the result file",
             cxxopts::value<std::string>()->default_value("result.json"))
+            ("f,file", "Path to the file to be loaded",
+            cxxopts::value<std::string>())
             ("g,group", "VFIO group",
             cxxopts::value<std::string>())
             ("d,device", "PCI device ID",
@@ -57,27 +61,21 @@ int main(int argc, char* argv[])
     auto args = parse_arguments(argc, argv);
 
     std::string backend;
-    std::string config_file, workload_file, result_file;
+    std::string config_file, result_file;
+    std::string load_file;
     try {
         backend = args["backend"].as<std::string>();
         config_file = args["config"].as<std::string>();
-        workload_file = args["workload"].as<std::string>();
         result_file = args["result"].as<std::string>();
+        load_file = args["file"].as<std::string>();
     } catch (const OptionException& e) {
         spdlog::error("Failed to parse options: {}", e.what());
         exit(EXIT_FAILURE);
     }
 
-    HostConfig host_config;
     mcmq::SsdConfig ssd_config;
     if (!ConfigReader::load_ssd_config(config_file, ssd_config)) {
         spdlog::error("Failed to read SSD config");
-        exit(EXIT_FAILURE);
-    }
-
-    if (!ConfigReader::load_host_config(workload_file, ssd_config,
-                                        host_config)) {
-        spdlog::error("Failed to read workload config");
         exit(EXIT_FAILURE);
     }
 
@@ -107,8 +105,8 @@ int main(int argc, char* argv[])
             exit(EXIT_FAILURE);
         }
 
-        memory_space =
-            std::make_unique<VfioMemorySpace>(0x1000, 2 * 1024 * 1024);
+        memory_space = std::make_unique<VfioMemorySpace>(
+            0x1000, 2 * 1024 * 1024 + CHUNK_SIZE);
         link = std::make_unique<PCIeLinkVfio>(group, device_id);
     } else {
         spdlog::error("Unknown backend type: {}", backend);
@@ -123,71 +121,71 @@ int main(int argc, char* argv[])
     link->map_dma(*memory_space);
     link->start();
 
-    NVMeDriver driver(host_config.flows.size(), host_config.io_queue_depth,
-                      link.get(), memory_space.get(), false);
+    NVMeDriver driver(1, 1024, link.get(), memory_space.get(), false);
     driver.start(ssd_config);
 
-#if 1
-    // unsigned int ctx = driver.create_context(
-    //     "/home/jimx/projects/storpu/libstorpu/libtest.so");
-    // spdlog::info("Created context {}", ctx);
+    unsigned int ctx = driver.create_context(
+        "/home/jimx/projects/storpu/libstorpu/libtest.so");
+    spdlog::info("Created context {}", ctx);
 
-    // auto buffer = memory_space->allocate_pages(0x8000);
+    auto load_buf = memory_space->allocate(CHUNK_SIZE, 0x4000);
 
-    // driver.set_thread_id(1);
-    // unsigned long a = driver.invoke_function(ctx, 0x1058, buffer);
-    // unsigned long val;
-    // memory_space->read(buffer + 0x1000, &val, 8);
-    // spdlog::info("Invoke {:#x} {:#x}", a, val);
-    // memory_space->read(buffer + 0x2000, &val, 8);
-    // spdlog::info("Invoke {:#x} {:#x}", a, val);
-
-    // memory_space->free_pages(buffer, 0x8000);
-
-    auto nsid = driver.create_namespace(4UL << 32);
-    spdlog::info("Create NS {}", nsid);
-    driver.attach_namespace(nsid);
-    driver.detach_namespace(nsid);
-    driver.delete_namespace(nsid);
-
-#else
-    int thread_id = 1;
-    std::vector<std::unique_ptr<IOThread>> io_threads;
-    for (auto&& flow : host_config.flows) {
-        auto it = host_config.namespaces.find(flow.nsid);
-        if (it == host_config.namespaces.end()) {
-            spdlog::error("Unknown namespace {} for flow {}", flow.nsid,
-                          thread_id);
-            return EXIT_FAILURE;
-        }
-
-        const auto& ns = it->second;
-
-        io_threads.emplace_back(IOThread::create_thread(
-            &driver, memory_space.get(), thread_id, host_config.io_queue_depth,
-            host_config.sector_size, ns.capacity_sects, flow));
-
-        thread_id++;
+    std::ifstream ifs(load_file, std::ios::binary);
+    if (!ifs.is_open()) {
+        spdlog::error("Failed to open load file");
+        return EXIT_FAILURE;
     }
 
-    for (auto&& thread : io_threads)
-        thread->run();
+    size_t fsize = ifs.tellg();
+    ifs.seekg(0, std::ios::end);
+    fsize = (size_t)ifs.tellg() - fsize;
 
-    for (auto&& thread : io_threads)
-        thread->join();
+    spdlog::info("File size {}", fsize);
+
+    struct {
+        unsigned long fd;
+        unsigned long host_addr;
+        unsigned long flash_addr;
+        unsigned long length;
+    } lda;
+
+    auto* scratchpad = driver.get_scratchpad();
+    auto argbuf = scratchpad->allocate(sizeof(lda));
 
     driver.set_thread_id(1);
-    driver.flush(1);
 
-    HostResult host_result;
-    for (auto&& thread : io_threads)
-        host_result.thread_stats.push_back(thread->get_stats());
+    size_t offset = 0;
+    auto page_buf = std::make_unique<char[]>(LOAD_PAGE_SIZE);
 
-    mcmq::SimResult sim_result;
-    driver.report(sim_result);
+    while (offset < fsize) {
+        auto chunk = std::min(fsize - offset, CHUNK_SIZE);
+        size_t read_len = 0;
 
-    ResultExporter::export_result(result_file, host_result, sim_result);
-#endif
+        while (read_len < chunk) {
+            size_t page_len = std::min(chunk - read_len, LOAD_PAGE_SIZE);
+
+            ifs.seekg(offset + read_len, std::ios::beg);
+            ifs.read(page_buf.get(), page_len);
+
+            memory_space->write(load_buf + read_len, page_buf.get(), page_len);
+            read_len += page_len;
+        }
+
+        lda.fd = 0;
+        lda.flash_addr = offset;
+        lda.host_addr = load_buf;
+        lda.length = chunk;
+
+        scratchpad->write(argbuf, &lda, sizeof(lda));
+
+        unsigned long r = driver.invoke_function(ctx, 0x12d0, argbuf);
+
+        spdlog::info("Invoke {:#x}", r);
+
+        offset += chunk;
+    }
+
+    scratchpad->free(argbuf, sizeof(lda));
 
     driver.shutdown();
     link->stop();

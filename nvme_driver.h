@@ -64,6 +64,8 @@ public:
     void write(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
                size_t size);
 
+    void flush(unsigned int nsid);
+
     void read_async(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
                     size_t size, AsyncCommandCallback&& callback)
     {
@@ -78,14 +80,26 @@ public:
                                 std::move(callback));
     }
 
+    void flush_async(unsigned int nsid, AsyncCommandCallback&& callback)
+    {
+        (void)submit_flush_command(nsid, std::move(callback));
+    }
+
     void report(mcmq::SimResult& result) { link->report(result); }
 
     void shutdown();
+
+    MemorySpace* get_scratchpad() { return bar4_mem.get(); }
 
     uint32_t create_context(const std::filesystem::path& filename);
 
     unsigned long invoke_function(unsigned int cid, MemorySpace::Address entry,
                                   MemorySpace::Address arg);
+
+    unsigned int create_namespace(size_t size_bytes);
+    void delete_namespace(unsigned int nsid);
+    void attach_namespace(unsigned int nsid);
+    void detach_namespace(unsigned int nsid);
 
 private:
     static constexpr unsigned AQ_DEPTH = 32;
@@ -213,10 +227,20 @@ private:
                                     size_t size,
                                     AsyncCommandCallback&& callback);
 
+    AsyncCommand* submit_flush_command(unsigned int nsid,
+                                       AsyncCommandCallback&& callback);
+
     AsyncCommand* submit_invoke_command(unsigned int cid,
                                         MemorySpace::Address entry,
                                         MemorySpace::Address arg,
                                         AsyncCommandCallback&& callback);
+
+    NVMeStatus submit_ns_mgmt(unsigned int nsid, int sel,
+                              MemorySpace::Address buffer, size_t size,
+                              union nvme_completion::nvme_result* res);
+
+    NVMeStatus submit_ns_attach(unsigned int nsid, int sel,
+                                MemorySpace::Address buffer, size_t size);
 };
 
 #endif
