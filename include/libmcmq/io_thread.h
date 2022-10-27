@@ -3,8 +3,8 @@
 
 #include "config_reader.h"
 #include "histogram.h"
-#include "memory_space.h"
-#include "nvme_driver.h"
+#include "libunvme/memory_space.h"
+#include "libunvme/nvme_driver.h"
 
 #include <chrono>
 #include <memory>

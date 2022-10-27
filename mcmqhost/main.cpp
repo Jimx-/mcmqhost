@@ -1,10 +1,10 @@
-#include "config_reader.h"
-#include "io_thread_synthetic.h"
-#include "memory_space.h"
-#include "nvme_driver.h"
-#include "pcie_link_mcmq.h"
-#include "pcie_link_vfio.h"
-#include "result_exporter.h"
+#include "libmcmq/config_reader.h"
+#include "libmcmq/io_thread_synthetic.h"
+#include "libmcmq/result_exporter.h"
+#include "libunvme/memory_space.h"
+#include "libunvme/nvme_driver.h"
+#include "libunvme/pcie_link_mcmq.h"
+#include "libunvme/pcie_link_vfio.h"
 
 #include "cxxopts.hpp"
 #include "spdlog/cfg/env.h"
@@ -125,7 +125,8 @@ int main(int argc, char* argv[])
 
     NVMeDriver driver(host_config.flows.size(), host_config.io_queue_depth,
                       link.get(), memory_space.get(), false);
-    driver.start(ssd_config);
+    link->send_config(ssd_config);
+    driver.start();
 
 #if 1
     // unsigned int ctx = driver.create_context(

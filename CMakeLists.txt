@@ -29,52 +29,17 @@ if (NOT PROTOBUF_FOUND)
     message(FATAL_ERROR "Fatal error: Protobuf required.")
 endif (NOT PROTOBUF_FOUND)
 
-set(PROTO_FILES proto/ssd_config.proto
-                proto/sim_result.proto)
-PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
-
 find_package(FUSE3 3.12 REQUIRED)
 if (NOT FUSE3_FOUND)
     message(FATAL_ERROR "Fatal error: Fuse required.")
 endif (NOT FUSE3_FOUND)
 
-
-include_directories(${PROTOBUF_INCLUDE_DIRS}
-                    ${FUSE3_INCLUDE_DIRS}
+include_directories(${TOPDIR}/include                    
                     ${CMAKE_CURRENT_BINARY_DIR}
                     )
-
-set(SOURCE_FILES
-    pcie_link.cpp
-    pcie_link_mcmq.cpp
-    pcie_link_vfio.cpp
-    memory_space.cpp
-    nvme_driver.cpp
-    config_reader.cpp
-    result_exporter.cpp
-    io_thread.cpp
-    io_thread_synthetic.cpp
-    ${PROTO_SRCS}
-)
-
-set(EXT_SOURCE_FILES )
-
-set(LIBRARIES
-    pthread
-    atomic
-    CONAN_PKG::spdlog
-    CONAN_PKG::cxxopts
-    CONAN_PKG::yaml-cpp
-    CONAN_PKG::nlohmann_json
-    CONAN_PKG::hdrhistogram-c
-    ${PROTOBUF_LIBRARIES}
-)
-    
-add_executable(mcmqhost main.cpp ${SOURCE_FILES} ${EXT_SOURCE_FILES})
-target_link_libraries(mcmqhost ${LIBRARIES})
-
-add_executable(loaddata data_loader.cpp ${SOURCE_FILES} ${EXT_SOURCE_FILES})
-target_link_libraries(loaddata ${LIBRARIES})
-
-add_executable(mirrorfs mirrorfs.cpp ${SOURCE_FILES} ${EXT_SOURCE_FILES})
-target_link_libraries(mirrorfs ${LIBRARIES} ${FUSE3_LIBRARIES})
+                    
+add_subdirectory(libmcmq)
+add_subdirectory(libunvme)
+add_subdirectory(mcmqhost)
+add_subdirectory(storpu-utils)
+add_subdirectory(mirrorfs)

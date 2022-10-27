@@ -54,7 +54,7 @@ public:
                         PCIeLink* link, MemorySpace* memory_space,
                         bool use_dbbuf = false);
 
-    void start(const mcmq::SsdConfig& config);
+    void start();
 
     void set_thread_id(unsigned int thread_id);
 

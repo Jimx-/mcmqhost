@@ -1,4 +1,4 @@
-#include "nvme_driver.h"
+#include "libunvme/nvme_driver.h"
 
 #include "spdlog/spdlog.h"
 
@@ -60,9 +60,8 @@ void NVMeDriver::set_thread_id(unsigned int thread_id)
     thread_io_queue = queues[thread_id].get();
 }
 
-void NVMeDriver::start(const mcmq::SsdConfig& config)
+void NVMeDriver::start()
 {
-    link->send_config(config);
     link->wait_for_device_ready();
 
     /* IO queues + admin queue */

@@ -1,10 +1,7 @@
-#include "config_reader.h"
-#include "io_thread_synthetic.h"
-#include "memory_space.h"
-#include "nvme_driver.h"
-#include "pcie_link_mcmq.h"
-#include "pcie_link_vfio.h"
-#include "result_exporter.h"
+#include "libunvme/memory_space.h"
+#include "libunvme/nvme_driver.h"
+#include "libunvme/pcie_link_mcmq.h"
+#include "libunvme/pcie_link_vfio.h"
 
 #include "cxxopts.hpp"
 #include "spdlog/cfg/env.h"
@@ -73,12 +70,6 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
-    mcmq::SsdConfig ssd_config;
-    if (!ConfigReader::load_ssd_config(config_file, ssd_config)) {
-        spdlog::error("Failed to read SSD config");
-        exit(EXIT_FAILURE);
-    }
-
     std::unique_ptr<MemorySpace> memory_space;
     std::unique_ptr<PCIeLink> link;
 
@@ -122,7 +113,7 @@ int main(int argc, char* argv[])
     link->start();
 
     NVMeDriver driver(1, 1024, link.get(), memory_space.get(), false);
-    driver.start(ssd_config);
+    driver.start();
 
     unsigned int ctx = driver.create_context(
         "/home/jimx/projects/storpu/libstorpu/libtest.so");

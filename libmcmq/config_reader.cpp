@@ -1,4 +1,4 @@
-#include "config_reader.h"
+#include "libmcmq/config_reader.h"
 
 #include <yaml-cpp/yaml.h>
 
