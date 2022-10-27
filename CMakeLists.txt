@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(TOPDIR ${PROJECT_SOURCE_DIR})
 
+set(CMAKE_MODULE_PATH "${TOPDIR}/cmake;${CMAKE_MODULE_PATH}")
+
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
@@ -31,7 +33,14 @@ set(PROTO_FILES proto/ssd_config.proto
                 proto/sim_result.proto)
 PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
 
+find_package(FUSE3 3.12 REQUIRED)
+if (NOT FUSE3_FOUND)
+    message(FATAL_ERROR "Fatal error: Fuse required.")
+endif (NOT FUSE3_FOUND)
+
+
 include_directories(${PROTOBUF_INCLUDE_DIRS}
+                    ${FUSE3_INCLUDE_DIRS}
                     ${CMAKE_CURRENT_BINARY_DIR}
                     )
 
@@ -66,3 +75,6 @@ target_link_libraries(mcmqhost ${LIBRARIES})
 
 add_executable(loaddata data_loader.cpp ${SOURCE_FILES} ${EXT_SOURCE_FILES})
 target_link_libraries(loaddata ${LIBRARIES})
+
+add_executable(mirrorfs mirrorfs.cpp ${SOURCE_FILES} ${EXT_SOURCE_FILES})
+target_link_libraries(mirrorfs ${LIBRARIES} ${FUSE3_LIBRARIES})

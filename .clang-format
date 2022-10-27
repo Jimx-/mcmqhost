@@ -39,3 +39,5 @@ ReflowComments: true
 
 NamespaceIndentation: None
 AccessModifierOffset: -4
+
+BreakStringLiterals: false
