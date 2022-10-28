@@ -18,6 +18,10 @@ public:
         DeviceIOError(const char* msg);
     };
 
+    struct NamespaceUnavailableError : public virtual std::runtime_error {
+        NamespaceUnavailableError();
+    };
+
     using NVMeStatus = uint32_t;
     using NVMeResult = nvme_completion::nvme_result;
 
@@ -169,6 +173,8 @@ private:
     std::unique_ptr<MemorySpace> bar4_mem;
 
     void reset();
+
+    void check_status(int status);
 
     void allocate_queue(unsigned qid, unsigned depth);
     void init_queue(unsigned qid);

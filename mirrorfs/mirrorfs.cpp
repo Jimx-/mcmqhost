@@ -3,9 +3,14 @@
 
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 12)
 
+#include "libunvme/memory_space.h"
+#include "libunvme/nvme_driver.h"
+#include "libunvme/pcie_link_vfio.h"
+
 #include <dirent.h>
 #include <fuse_lowlevel.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 #include <iostream>
@@ -14,6 +19,10 @@
 #include "cxxopts.hpp"
 #include "spdlog/cfg/env.h"
 #include "spdlog/spdlog.h"
+
+#define DEFAULT_FILE_SIZE (4UL << 30)
+
+#define NSID_XATTR "user.mirrorfs.nsid"
 
 using cxxopts::OptionException;
 
@@ -33,6 +42,7 @@ struct Inode {
     dev_t src_dev{0};
     ino_t src_ino{0};
     int generation{0};
+    unsigned int nsid;
     uint64_t nopen{0};
     uint64_t nlookup{0};
     std::mutex m;
@@ -57,6 +67,8 @@ struct Fs {
     std::mutex mutex;
     InodeMap inodes;
     Inode root;
+    NVMeDriver* driver;
+    MemorySpace* mem_space;
     double timeout;
     bool debug;
     std::string source;
@@ -126,14 +138,14 @@ static void do_setattr(fuse_req_t req, fuse_ino_t ino, struct stat* attr,
         if (res == -1) goto out_err;
     }
     if (valid & FUSE_SET_ATTR_SIZE) {
-        if (fi) {
-            res = ftruncate(fi->fh, attr->st_size);
-        } else {
-            char procname[64];
-            sprintf(procname, "/proc/self/fd/%i", ifd);
-            res = truncate(procname, attr->st_size);
-        }
-        if (res == -1) goto out_err;
+        // if (fi) {
+        //     res = ftruncate(fi->fh, attr->st_size);
+        // } else {
+        //     char procname[64];
+        //     sprintf(procname, "/proc/self/fd/%i", ifd);
+        //     res = truncate(procname, attr->st_size);
+        // }
+        // if (res == -1) goto out_err;
     }
     if (valid & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME)) {
         struct timespec tv[2];
@@ -242,6 +254,26 @@ static int do_lookup(fuse_ino_t parent, const char* name, fuse_entry_param* e)
         std::lock_guard<std::mutex> g{inode.m};
         inode.src_ino = e->attr.st_ino;
         inode.src_dev = e->attr.st_dev;
+        inode.nsid = 0;
+
+        {
+            // Temporarily open the file for fgetxattr
+            char buf[64];
+            sprintf(buf, "/proc/self/fd/%i", newfd);
+            auto fd = open(buf, O_RDONLY);
+            if (fd >= 0) {
+                auto err =
+                    fgetxattr(fd, NSID_XATTR, &inode.nsid, sizeof(inode.nsid));
+
+                if (err < 0) {
+                    spdlog::warn("lookup(): failed to read NSID: {}",
+                                 strerror(errno));
+                    inode.nsid = 0;
+                }
+
+                close(fd);
+            }
+        }
 
         inode.nlookup++;
         spdlog::debug("lookup(): inode {} count {}", inode.src_ino,
@@ -488,24 +520,63 @@ static void mfs_releasedir(fuse_req_t req, fuse_ino_t ino, fuse_file_info* fi)
     fuse_reply_err(req, 0);
 }
 
+static void mfs_fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync,
+                         fuse_file_info* fi)
+{
+    (void)ino;
+    int res;
+    int fd = dirfd(get_dir_handle(fi)->dp);
+    if (datasync)
+        res = fdatasync(fd);
+    else
+        res = fsync(fd);
+    fuse_reply_err(req, res == -1 ? errno : 0);
+}
+
 static void mfs_create(fuse_req_t req, fuse_ino_t parent, const char* name,
                        mode_t mode, fuse_file_info* fi)
 {
     Inode& inode_p = get_inode(parent);
+    int err = 0;
 
     auto fd =
         openat(inode_p.fd, name, (fi->flags | O_CREAT) & ~O_NOFOLLOW, mode);
     if (fd == -1) {
-        auto err = errno;
+        err = errno;
         if (err == ENFILE || err == EMFILE)
             spdlog::error("Reached maximum number of file descriptors");
         fuse_reply_err(req, err);
         return;
     }
 
+    unsigned int nsid;
+
+    try {
+        std::lock_guard<std::mutex> lock(fs.mutex);
+
+        nsid = fs.driver->create_namespace(DEFAULT_FILE_SIZE);
+        fs.driver->attach_namespace(nsid);
+    } catch (NVMeDriver::NamespaceUnavailableError&) {
+        err = ENFILE;
+    } catch (NVMeDriver::DeviceIOError&) {
+        err = EIO;
+    }
+
+    if (err != 0) goto err_unlink;
+
+    if (fsetxattr(fd, NSID_XATTR, &nsid, sizeof(nsid), 0) < 0) {
+        err = errno;
+        goto err_del_ns;
+    }
+
+    if (ftruncate(fd, DEFAULT_FILE_SIZE) < 0) {
+        err = errno;
+        goto err_del_ns;
+    }
+
     fi->fh = fd;
     fuse_entry_param e;
-    auto err = do_lookup(parent, name, &e);
+    err = do_lookup(parent, name, &e);
     if (err) {
         if (err == ENFILE || err == EMFILE)
             spdlog::error("Reached maximum number of file descriptors");
@@ -513,15 +584,32 @@ static void mfs_create(fuse_req_t req, fuse_ino_t parent, const char* name,
         return;
     }
 
-    Inode& inode = get_inode(e.ino);
-    std::lock_guard<std::mutex> g{inode.m};
-    inode.nopen++;
-    fuse_reply_create(req, &e, fi);
+    {
+        Inode& inode = get_inode(e.ino);
+        std::lock_guard<std::mutex> g{inode.m};
+        inode.nopen++;
+        fuse_reply_create(req, &e, fi);
+    }
+
+    return;
+
+err_del_ns :
+
+{
+    std::lock_guard<std::mutex> lock(fs.mutex);
+    fs.driver->delete_namespace(nsid);
+}
+
+err_unlink:
+    unlinkat(inode_p.fd, name, 0);
+    fuse_reply_err(req, err);
 }
 
 static void mfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info* fi)
 {
     Inode& inode = get_inode(ino);
+
+    fi->flags &= ~O_TRUNC;
 
     /* With writeback cache, kernel may send read requests even
        when userspace opened write-only */
@@ -568,6 +656,179 @@ static void mfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info* fi)
     fuse_reply_err(req, 0);
 }
 
+static void mfs_unlink(fuse_req_t req, fuse_ino_t parent, const char* name)
+{
+    Inode& inode_p = get_inode(parent);
+
+    if (!fs.timeout) {
+        fuse_entry_param e;
+        auto err = do_lookup(parent, name, &e);
+        if (err) {
+            fuse_reply_err(req, err);
+            return;
+        }
+        if (e.attr.st_nlink == 1) {
+            Inode& inode = get_inode(e.ino);
+            std::lock_guard<std::mutex> g{inode.m};
+            if (inode.fd > 0 && !inode.nopen) {
+                spdlog::debug("unlink: release inode {}; fd = {}",
+                              e.attr.st_ino, inode.fd);
+                std::lock_guard<std::mutex> g_fs{fs.mutex};
+
+                try {
+                    fs.driver->delete_namespace(inode.nsid);
+                } catch (NVMeDriver::DeviceIOError&) {
+                    fuse_reply_err(req, EIO);
+                    return;
+                }
+
+                close(inode.fd);
+                inode.fd = -ENOENT;
+                inode.generation++;
+            }
+        }
+
+        // decrease the ref which lookup above had increased
+        forget_one(e.ino, 1);
+    }
+    auto res = unlinkat(inode_p.fd, name, 0);
+    fuse_reply_err(req, res == -1 ? errno : 0);
+}
+
+#define roundup(x, align) \
+    (((x) % align == 0) ? (x) : (((x) + align) - ((x) % align)))
+
+static void ensure_io_thread()
+{
+    static int thread_id = 1;
+    thread_local bool inited = false;
+
+    if (!inited) {
+        fs.driver->set_thread_id(thread_id++);
+        inited = true;
+    }
+}
+
+static void update_times(int fd, bool set_atime, bool set_mtime)
+{
+    struct timespec times[2];
+
+    times[0].tv_nsec = set_atime ? UTIME_NOW : UTIME_OMIT;
+    times[1].tv_nsec = set_mtime ? UTIME_NOW : UTIME_OMIT;
+
+    futimens(fd, times);
+}
+
+static void mfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
+                     fuse_file_info* fi)
+{
+    ensure_io_thread();
+
+    off_t block_off = off % 0x1000UL;
+    size_t buf_size = size;
+    off -= block_off;
+    buf_size += block_off;
+    buf_size = roundup(buf_size, 0x1000UL);
+
+    MemorySpace::Address buf;
+
+    try {
+        buf = fs.mem_space->allocate_pages(buf_size);
+    } catch (MemorySpace::MemoryNotAvailable&) {
+        fuse_reply_err(req, ENOMEM);
+        return;
+    }
+
+    auto callback = [=](NVMeDriver::NVMeStatus status,
+                        const NVMeDriver::NVMeResult& res) {
+        int ret = 0;
+
+        if (status & 0x7ff) ret = EIO;
+
+        if (ret == 0) {
+            size_t copy_size = size;
+            auto ptr = fs.mem_space->get_raw_ptr(buf + block_off, copy_size);
+
+            update_times(fi->fh, true, false);
+
+            fuse_reply_buf(req, (const char*)ptr, copy_size);
+        } else {
+            fuse_reply_err(req, ret);
+        }
+
+        fs.mem_space->free(buf, buf_size);
+    };
+
+    Inode& inode = get_inode(ino);
+
+    fs.driver->read_async(inode.nsid, off, buf, buf_size, std::move(callback));
+}
+
+static void mfs_write(fuse_req_t req, fuse_ino_t ino, const char* buf,
+                      size_t size, off_t off, struct fuse_file_info* fi)
+{
+    ensure_io_thread();
+
+    off_t block_off = off % 0x1000UL;
+    size_t buf_size = size;
+    off -= block_off;
+    buf_size += block_off;
+    buf_size = roundup(buf_size, 0x1000UL);
+
+    // TODO: handle read-modify-write
+
+    MemorySpace::Address dma_buf;
+    try {
+        dma_buf = fs.mem_space->allocate_pages(buf_size);
+    } catch (MemorySpace::MemoryNotAvailable&) {
+        fuse_reply_err(req, ENOMEM);
+        return;
+    }
+
+    fs.mem_space->write(dma_buf + block_off, buf, size);
+
+    auto callback = [=](NVMeDriver::NVMeStatus status,
+                        const NVMeDriver::NVMeResult& res) {
+        int ret = 0;
+
+        if (status & 0x7ff) ret = EIO;
+
+        if (ret == 0) {
+            update_times(fi->fh, false, true);
+            fuse_reply_write(req, size);
+        } else {
+            fuse_reply_err(req, ret);
+        }
+
+        fs.mem_space->free(dma_buf, buf_size);
+    };
+
+    Inode& inode = get_inode(ino);
+
+    fs.driver->write_async(inode.nsid, off, dma_buf, buf_size,
+                           std::move(callback));
+}
+
+static void mfs_fsync(fuse_req_t req, fuse_ino_t ino, int datasync,
+                      fuse_file_info* fi)
+{
+    auto callback = [req](NVMeDriver::NVMeStatus status,
+                          const NVMeDriver::NVMeResult& res) {
+        auto ret = 0;
+
+        if (status & 0x7ff) ret = EIO;
+        fuse_reply_err(req, ret);
+    };
+
+    Inode& inode = get_inode(ino);
+
+    if (!datasync) {
+        fsync(fi->fh);
+    }
+
+    fs.driver->flush_async(inode.nsid, std::move(callback));
+}
+
 cxxopts::ParseResult parse_arguments(int argc, char* argv[])
 {
     try {
@@ -579,6 +840,8 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
             ("mountpoint", "Mount point", cxxopts::value<std::string>())
             ("m,mirror", "Mirror directory", cxxopts::value<std::string>())
             ("N,max-threads", "Maximum number of threads",cxxopts::value<int>()->default_value("8"))
+            ("g,group", "VFIO group", cxxopts::value<std::string>())
+            ("d,device", "PCI device ID", cxxopts::value<std::string>())
             ("h,help", "Print help");
         // clang-format on
 
@@ -609,10 +872,14 @@ int main(int argc, char* argv[])
 
     int max_threads;
     std::string mountpoint, mirror;
+    std::string group, device_id;
     try {
         max_threads = options["max-threads"].as<int>();
         mountpoint = options["mountpoint"].as<std::string>();
         mirror = options["mirror"].as<std::string>();
+
+        group = options["group"].as<std::string>();
+        device_id = options["device"].as<std::string>();
     } catch (const OptionException& e) {
         spdlog::error("Failed to parse options: {}", e.what());
         exit(EXIT_FAILURE);
@@ -651,15 +918,41 @@ int main(int argc, char* argv[])
         .forget = mfs_forget,
         .getattr = mfs_getattr,
         .setattr = mfs_setattr,
+        .unlink = mfs_unlink,
         .open = mfs_open,
+        .read = mfs_read,
+        .write = mfs_write,
         .release = mfs_release,
+        .fsync = mfs_fsync,
         .opendir = mfs_opendir,
         .readdir = mfs_readdir,
         .releasedir = mfs_releasedir,
+        .fsyncdir = mfs_fsyncdir,
         .create = mfs_create,
         .forget_multi = mfs_forget_multi,
         .readdirplus = mfs_readdirplus,
     };
+
+    // Initialize NVMe device
+    std::unique_ptr<MemorySpace> memory_space;
+    std::unique_ptr<PCIeLink> link;
+
+    memory_space = std::make_unique<VfioMemorySpace>(0x1000, 2 * 1024 * 1024);
+    link = std::make_unique<PCIeLinkVfio>(group, device_id);
+
+    if (!link->init()) {
+        spdlog::error("Failed to initialize PCIe link");
+        return EXIT_FAILURE;
+    }
+
+    link->map_dma(*memory_space);
+    link->start();
+
+    NVMeDriver driver(max_threads, 1024, link.get(), memory_space.get(), false);
+    driver.start();
+
+    fs.driver = &driver;
+    fs.mem_space = memory_space.get();
 
     auto se = fuse_session_new(&args, &mfs_oper, sizeof(mfs_oper), nullptr);
     if (!se) {
@@ -690,6 +983,9 @@ err_out2:
 err_out1:
     fuse_loop_cfg_destroy(loop_config);
     fuse_opt_free_args(&args);
+
+    driver.shutdown();
+    link->stop();
 
     return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

@@ -25,6 +25,8 @@ public:
     virtual void write(Address addr, const void* buf, size_t len);
     virtual void memset(Address addr, int c, size_t len);
 
+    const void* get_raw_ptr(Address addr, size_t& len) const;
+
     void* get_map_base() const { return map_base; }
     size_t get_map_size() const { return map_size; }
     Address get_iova_base() const { return iova_base; }

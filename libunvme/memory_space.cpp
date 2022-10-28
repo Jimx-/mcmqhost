@@ -178,6 +178,16 @@ void MemorySpace::memset(Address addr, int c, size_t len)
     ::memset((char*)map_base + addr, c, len);
 }
 
+const void* MemorySpace::get_raw_ptr(Address addr, size_t& len) const
+{
+    addr -= iova_base;
+
+    if (addr >= map_size) return nullptr;
+
+    len = std::min(len, map_size - addr);
+    return (char*)map_base + addr;
+}
+
 SharedMemorySpace::SharedMemorySpace(const fs::path& filename)
     : MemorySpace(0), filename(filename)
 {

@@ -20,6 +20,12 @@ NVMeDriver::DeviceIOError::DeviceIOError(const char* msg)
     spdlog::error("NVMe device IO error: {}", msg);
 }
 
+NVMeDriver::NamespaceUnavailableError::NamespaceUnavailableError()
+    : std::runtime_error("")
+{
+    spdlog::error("NVMe namespace unavailable");
+}
+
 NVMeDriver::NVMeStatus NVMeDriver::AsyncCommand::wait(NVMeResult* resp)
 {
     NVMeStatus out_status;
@@ -133,6 +139,18 @@ void NVMeDriver::reset()
 
     if (dbbuf_dbs) {
         dbbuf_config();
+    }
+}
+
+void NVMeDriver::check_status(int status)
+{
+    switch (status) {
+    case NVME_SC_SUCCESS:
+        return;
+    case NVME_SC_NS_ID_UNAVAILABLE:
+        throw NamespaceUnavailableError();
+    default:
+        throw DeviceIOError("NVMe internal error");
     }
 }
 
@@ -771,8 +789,7 @@ unsigned int NVMeDriver::create_namespace(size_t size_bytes)
     memory_space->free(buffer, sizeof(*id_ns));
     delete id_ns;
 
-    if ((status & 0x7ff) != NVME_SC_SUCCESS)
-        throw DeviceIOError("Create namespace command error");
+    check_status(status & 0x7ff);
 
     return res.u32;
 }
@@ -783,8 +800,7 @@ void NVMeDriver::delete_namespace(unsigned int nsid)
 
     status = submit_ns_mgmt(nsid, 1, 0, 0, nullptr);
 
-    if ((status & 0x7ff) != NVME_SC_SUCCESS)
-        throw DeviceIOError("Delete namespace command error");
+    check_status(status & 0x7ff);
 }
 
 NVMeDriver::NVMeStatus NVMeDriver::submit_ns_attach(unsigned int nsid, int sel,
@@ -824,8 +840,7 @@ void NVMeDriver::attach_namespace(unsigned int nsid)
     memory_space->free(buffer, 0x1000);
     delete[] ctrl_list;
 
-    if ((status & 0x7ff) != NVME_SC_SUCCESS)
-        throw DeviceIOError("Attach namespace command error");
+    check_status(status & 0x7ff);
 }
 
 void NVMeDriver::detach_namespace(unsigned int nsid)
@@ -847,6 +862,5 @@ void NVMeDriver::detach_namespace(unsigned int nsid)
     memory_space->free(buffer, 0x1000);
     delete[] ctrl_list;
 
-    if ((status & 0x7ff) != NVME_SC_SUCCESS)
-        throw DeviceIOError("Detach namespace command error");
+    check_status(status & 0x7ff);
 }
