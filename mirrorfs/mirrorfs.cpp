@@ -41,6 +41,7 @@ struct Inode {
     int fd{-1};
     dev_t src_dev{0};
     ino_t src_ino{0};
+    size_t size;
     int generation{0};
     unsigned int nsid;
     uint64_t nopen{0};
@@ -138,14 +139,14 @@ static void do_setattr(fuse_req_t req, fuse_ino_t ino, struct stat* attr,
         if (res == -1) goto out_err;
     }
     if (valid & FUSE_SET_ATTR_SIZE) {
-        // if (fi) {
-        //     res = ftruncate(fi->fh, attr->st_size);
-        // } else {
-        //     char procname[64];
-        //     sprintf(procname, "/proc/self/fd/%i", ifd);
-        //     res = truncate(procname, attr->st_size);
-        // }
-        // if (res == -1) goto out_err;
+        if (fi) {
+            res = ftruncate(fi->fh, attr->st_size);
+        } else {
+            char procname[64];
+            sprintf(procname, "/proc/self/fd/%i", ifd);
+            res = truncate(procname, attr->st_size);
+        }
+        if (res == -1) goto out_err;
     }
     if (valid & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME)) {
         struct timespec tv[2];
@@ -254,6 +255,7 @@ static int do_lookup(fuse_ino_t parent, const char* name, fuse_entry_param* e)
         std::lock_guard<std::mutex> g{inode.m};
         inode.src_ino = e->attr.st_ino;
         inode.src_dev = e->attr.st_dev;
+        inode.size = e->attr.st_size;
         inode.nsid = 0;
 
         {
@@ -569,10 +571,10 @@ static void mfs_create(fuse_req_t req, fuse_ino_t parent, const char* name,
         goto err_del_ns;
     }
 
-    if (ftruncate(fd, DEFAULT_FILE_SIZE) < 0) {
-        err = errno;
-        goto err_del_ns;
-    }
+    // if (ftruncate(fd, DEFAULT_FILE_SIZE) < 0) {
+    //     err = errno;
+    //     goto err_del_ns;
+    // }
 
     fi->fh = fd;
     fuse_entry_param e;
@@ -608,8 +610,6 @@ err_unlink:
 static void mfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info* fi)
 {
     Inode& inode = get_inode(ino);
-
-    fi->flags &= ~O_TRUNC;
 
     /* With writeback cache, kernel may send read requests even
        when userspace opened write-only */
@@ -769,9 +769,11 @@ static void mfs_write(fuse_req_t req, fuse_ino_t ino, const char* buf,
 {
     ensure_io_thread();
 
-    off_t block_off = off % 0x1000UL;
+    off_t aligned_off = off;
+
+    off_t block_off = aligned_off % 0x1000UL;
     size_t buf_size = size;
-    off -= block_off;
+    aligned_off -= block_off;
     buf_size += block_off;
     buf_size = roundup(buf_size, 0x1000UL);
 
@@ -787,11 +789,22 @@ static void mfs_write(fuse_req_t req, fuse_ino_t ino, const char* buf,
 
     fs.mem_space->write(dma_buf + block_off, buf, size);
 
-    auto callback = [=](NVMeDriver::NVMeStatus status,
-                        const NVMeDriver::NVMeResult& res) {
+    Inode& inode = get_inode(ino);
+
+    auto callback = [=, &inode](NVMeDriver::NVMeStatus status,
+                                const NVMeDriver::NVMeResult& res) {
         int ret = 0;
 
         if (status & 0x7ff) ret = EIO;
+
+        {
+            std::lock_guard<std::mutex> g{inode.m};
+
+            if (size + off > inode.size) {
+                ret = ftruncate(fi->fh, size + off);
+                if (ret == 0) inode.size = size + off;
+            }
+        }
 
         if (ret == 0) {
             update_times(fi->fh, false, true);
@@ -803,9 +816,7 @@ static void mfs_write(fuse_req_t req, fuse_ino_t ino, const char* buf,
         fs.mem_space->free(dma_buf, buf_size);
     };
 
-    Inode& inode = get_inode(ino);
-
-    fs.driver->write_async(inode.nsid, off, dma_buf, buf_size,
+    fs.driver->write_async(inode.nsid, aligned_off, dma_buf, buf_size,
                            std::move(callback));
 }
 

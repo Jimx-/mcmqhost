@@ -145,11 +145,11 @@ int main(int argc, char* argv[])
 
     // memory_space->free_pages(buffer, 0x8000);
 
-    auto nsid = driver.create_namespace(4UL << 32);
-    spdlog::info("Create NS {}", nsid);
-    driver.attach_namespace(nsid);
-    driver.detach_namespace(nsid);
-    driver.delete_namespace(nsid);
+    //auto nsid = driver.create_namespace(4UL << 32);
+    //spdlog::info("Create NS {}", nsid);
+    //driver.attach_namespace(nsid);
+    //driver.detach_namespace(nsid);
+    //driver.delete_namespace(nsid);
 
 #else
     int thread_id = 1;
