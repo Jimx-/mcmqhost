@@ -257,7 +257,8 @@ void BARMemorySpace::read(Address addr, void* buf, size_t len)
     assert(!(addr & 0x7) && !(len & 0x7));
 
     for (size_t i = 0; i < len; i += 8) {
-        *(uint64_t*)((char*)buf + i) = *(uint64_t*)((char*)map_base + addr + i);
+        *(uint64_t*)((char*)buf + i) =
+            *(volatile uint64_t*)((char*)map_base + addr + i);
     }
 }
 
@@ -270,7 +271,8 @@ void BARMemorySpace::write(Address addr, const void* buf, size_t len)
     assert(!(addr & 0x7) && !(len & 0x7));
 
     for (size_t i = 0; i < len; i += 8) {
-        *(uint64_t*)((char*)map_base + addr + i) = *(uint64_t*)((char*)buf + i);
+        *(volatile uint64_t*)((char*)map_base + addr + i) =
+            *(uint64_t*)((char*)buf + i);
     }
 }
 
@@ -288,6 +290,6 @@ void BARMemorySpace::memset(Address addr, int c, size_t len)
     val |= val << 32;
 
     for (size_t i = 0; i < len; i += 8) {
-        *(uint64_t*)((char*)map_base + addr + i) = val;
+        *(volatile uint64_t*)((char*)map_base + addr + i) = val;
     }
 }

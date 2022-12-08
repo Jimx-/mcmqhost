@@ -364,6 +364,7 @@ enum nvme_admin_opcode {
     nvme_admin_sanitize_nvm = 0x84,
     nvme_admin_get_lba_status = 0x86,
     nvme_admin_storpu_create_context = 0xa0,
+    nvme_admin_storpu_delete_context = 0xa1,
 };
 
 enum {

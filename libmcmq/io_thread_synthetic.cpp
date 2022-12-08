@@ -1,5 +1,5 @@
-#include "io_thread_synthetic.h"
-#include "zipf_distribution.h"
+#include "libmcmq/io_thread_synthetic.h"
+#include "libmcmq/zipf_distribution.h"
 
 #include "spdlog/spdlog.h"
 

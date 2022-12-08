@@ -129,27 +129,29 @@ int main(int argc, char* argv[])
     driver.start();
 
 #if 1
-    // unsigned int ctx = driver.create_context(
-    //     "/home/jimx/projects/storpu/libstorpu/libtest.so");
-    // spdlog::info("Created context {}", ctx);
+    unsigned int ctx = driver.create_context(
+        "/home/jimx/projects/storpu/libstorpu/libtest.so");
+    spdlog::info("Created context {}", ctx);
 
-    // auto buffer = memory_space->allocate_pages(0x8000);
+    auto buffer = memory_space->allocate_pages(0x8000);
 
-    // driver.set_thread_id(1);
-    // unsigned long a = driver.invoke_function(ctx, 0x1058, buffer);
-    // unsigned long val;
-    // memory_space->read(buffer + 0x1000, &val, 8);
-    // spdlog::info("Invoke {:#x} {:#x}", a, val);
-    // memory_space->read(buffer + 0x2000, &val, 8);
-    // spdlog::info("Invoke {:#x} {:#x}", a, val);
+    driver.set_thread_id(1);
+    unsigned long a = driver.invoke_function(ctx, 0x1058, buffer);
+    unsigned long val;
+    memory_space->read(buffer + 0x1000, &val, 8);
+    spdlog::info("Invoke {:#x} {:#x}", a, val);
+    memory_space->read(buffer + 0x2000, &val, 8);
+    spdlog::info("Invoke {:#x} {:#x}", a, val);
 
-    // memory_space->free_pages(buffer, 0x8000);
+    memory_space->free_pages(buffer, 0x8000);
 
-    //auto nsid = driver.create_namespace(4UL << 32);
-    //spdlog::info("Create NS {}", nsid);
-    //driver.attach_namespace(nsid);
-    //driver.detach_namespace(nsid);
-    //driver.delete_namespace(nsid);
+    driver.delete_context(ctx);
+
+    // auto nsid = driver.create_namespace(4UL << 32);
+    // spdlog::info("Create NS {}", nsid);
+    // driver.attach_namespace(nsid);
+    // driver.detach_namespace(nsid);
+    // driver.delete_namespace(nsid);
 
 #else
     int thread_id = 1;

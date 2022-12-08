@@ -715,6 +715,22 @@ uint32_t NVMeDriver::create_context(const std::filesystem::path& filename)
     return endian::little_to_native(res.u32);
 }
 
+void NVMeDriver::delete_context(unsigned int cid)
+{
+    struct nvme_command c = {0};
+    union nvme_completion::nvme_result res;
+    auto& adminq = queues.front();
+
+    memset(&c, 0, sizeof(c));
+    c.common.opcode = nvme_admin_storpu_delete_context;
+    c.common.cdw10 = cid;
+
+    auto status = submit_sync_command(adminq.get(), &c, 0, 0, &res);
+
+    if ((status & 0x7ff) != NVME_SC_SUCCESS)
+        throw DeviceIOError("Delete context error");
+}
+
 NVMeDriver::AsyncCommand*
 NVMeDriver::submit_invoke_command(unsigned int cid, MemorySpace::Address entry,
                                   MemorySpace::Address arg,

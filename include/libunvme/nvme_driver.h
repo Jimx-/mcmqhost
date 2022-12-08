@@ -96,6 +96,7 @@ public:
     MemorySpace* get_scratchpad() { return bar4_mem.get(); }
 
     uint32_t create_context(const std::filesystem::path& filename);
+    void delete_context(unsigned int cid);
 
     unsigned long invoke_function(unsigned int cid, MemorySpace::Address entry,
                                   MemorySpace::Address arg);

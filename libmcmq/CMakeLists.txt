@@ -5,6 +5,8 @@ PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
 set(SOURCE_FILES
     config_reader.cpp
     result_exporter.cpp
+    io_thread.cpp
+    io_thread_synthetic.cpp
 )
 
 set(EXT_SOURCE_FILES

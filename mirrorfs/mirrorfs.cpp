@@ -80,6 +80,20 @@ struct Fs {
 };
 static Fs fs{};
 
+#define roundup(x, align) \
+    (((x) % align == 0) ? (x) : (((x) + align) - ((x) % align)))
+
+static void ensure_io_thread()
+{
+    static int thread_id = 1;
+    thread_local bool inited = false;
+
+    if (!inited) {
+        fs.driver->set_thread_id(thread_id++);
+        inited = true;
+    }
+}
+
 static Inode& get_inode(fuse_ino_t ino)
 {
     if (ino == FUSE_ROOT_ID) return fs.root;
@@ -258,7 +272,7 @@ static int do_lookup(fuse_ino_t parent, const char* name, fuse_entry_param* e)
         inode.size = e->attr.st_size;
         inode.nsid = 0;
 
-        {
+        if (S_ISREG(e->attr.st_mode)) {
             // Temporarily open the file for fgetxattr
             char buf[64];
             sprintf(buf, "/proc/self/fd/%i", newfd);
@@ -656,6 +670,41 @@ static void mfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info* fi)
     fuse_reply_err(req, 0);
 }
 
+static void mknod_symlink(fuse_req_t req, fuse_ino_t parent, const char* name,
+                          mode_t mode, dev_t rdev, const char* link)
+{
+    int res;
+    Inode& inode_p = get_inode(parent);
+    auto saverr = ENOMEM;
+
+    if (S_ISDIR(mode))
+        res = mkdirat(inode_p.fd, name, mode);
+    else if (S_ISLNK(mode))
+        res = symlinkat(link, inode_p.fd, name);
+    else
+        res = mknodat(inode_p.fd, name, mode, rdev);
+    saverr = errno;
+    if (res == -1) goto out;
+
+    fuse_entry_param e;
+    saverr = do_lookup(parent, name, &e);
+    if (saverr) goto out;
+
+    fuse_reply_entry(req, &e);
+    return;
+
+out:
+    if (saverr == ENFILE || saverr == EMFILE)
+        spdlog::error("ERROR: Reached maximum number of file descriptors.");
+    fuse_reply_err(req, saverr);
+}
+
+static void mfs_mkdir(fuse_req_t req, fuse_ino_t parent, const char* name,
+                      mode_t mode)
+{
+    mknod_symlink(req, parent, name, S_IFDIR | mode, 0, nullptr);
+}
+
 static void mfs_unlink(fuse_req_t req, fuse_ino_t parent, const char* name)
 {
     Inode& inode_p = get_inode(parent);
@@ -695,18 +744,12 @@ static void mfs_unlink(fuse_req_t req, fuse_ino_t parent, const char* name)
     fuse_reply_err(req, res == -1 ? errno : 0);
 }
 
-#define roundup(x, align) \
-    (((x) % align == 0) ? (x) : (((x) + align) - ((x) % align)))
-
-static void ensure_io_thread()
+static void mfs_rmdir(fuse_req_t req, fuse_ino_t parent, const char* name)
 {
-    static int thread_id = 1;
-    thread_local bool inited = false;
-
-    if (!inited) {
-        fs.driver->set_thread_id(thread_id++);
-        inited = true;
-    }
+    Inode& inode_p = get_inode(parent);
+    std::lock_guard<std::mutex> g{inode_p.m};
+    auto res = unlinkat(inode_p.fd, name, AT_REMOVEDIR);
+    fuse_reply_err(req, res == -1 ? errno : 0);
 }
 
 static void update_times(int fd, bool set_atime, bool set_mtime)
@@ -929,7 +972,9 @@ int main(int argc, char* argv[])
         .forget = mfs_forget,
         .getattr = mfs_getattr,
         .setattr = mfs_setattr,
+        .mkdir = mfs_mkdir,
         .unlink = mfs_unlink,
+        .rmdir = mfs_rmdir,
         .open = mfs_open,
         .read = mfs_read,
         .write = mfs_write,
