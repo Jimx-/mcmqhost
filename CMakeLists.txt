@@ -43,3 +43,7 @@ add_subdirectory(libunvme)
 add_subdirectory(mcmqhost)
 add_subdirectory(storpu-utils)
 add_subdirectory(mirrorfs)
+
+if (IS_DIRECTORY "${TOPDIR}/local")
+   add_subdirectory(local)
+endif()

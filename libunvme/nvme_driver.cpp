@@ -665,7 +665,7 @@ void NVMeDriver::read(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
 void NVMeDriver::write(unsigned int nsid, loff_t pos, MemorySpace::Address buf,
                        size_t size)
 {
-    auto cmd = submit_rw_command(false, nsid, pos, buf, size, {});
+    auto cmd = submit_rw_command(true, nsid, pos, buf, size, {});
     auto status = cmd->wait(nullptr);
     if ((status & 0x7ff) == NVME_SC_SUCCESS) return;
 
