@@ -34,7 +34,8 @@ if (NOT FUSE3_FOUND)
     message(FATAL_ERROR "Fatal error: Fuse required.")
 endif (NOT FUSE3_FOUND)
 
-include_directories(${TOPDIR}/include                    
+include_directories(${TOPDIR}/include
+                    ${TOPDIR}/lib
                     ${CMAKE_CURRENT_BINARY_DIR}
                     )
                     

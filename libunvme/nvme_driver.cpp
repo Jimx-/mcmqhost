@@ -733,7 +733,7 @@ void NVMeDriver::delete_context(unsigned int cid)
 
 NVMeDriver::AsyncCommand*
 NVMeDriver::submit_invoke_command(unsigned int cid, MemorySpace::Address entry,
-                                  MemorySpace::Address arg,
+                                  unsigned long arg,
                                   AsyncCommandCallback&& callback)
 {
     struct nvme_command cmd;
@@ -754,7 +754,7 @@ NVMeDriver::submit_invoke_command(unsigned int cid, MemorySpace::Address entry,
 
 unsigned long NVMeDriver::invoke_function(unsigned int cid,
                                           MemorySpace::Address entry,
-                                          MemorySpace::Address arg)
+                                          unsigned long arg)
 {
     auto cmd = submit_invoke_command(cid, entry, arg, {});
     union nvme_completion::nvme_result res;

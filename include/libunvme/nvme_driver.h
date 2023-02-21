@@ -93,13 +93,14 @@ public:
 
     void shutdown();
 
+    MemorySpace* get_dma_space() { return memory_space; }
     MemorySpace* get_scratchpad() { return bar4_mem.get(); }
 
     uint32_t create_context(const std::filesystem::path& filename);
     void delete_context(unsigned int cid);
 
     unsigned long invoke_function(unsigned int cid, MemorySpace::Address entry,
-                                  MemorySpace::Address arg);
+                                  unsigned long arg);
 
     unsigned int create_namespace(size_t size_bytes);
     void delete_namespace(unsigned int nsid);
@@ -239,7 +240,7 @@ private:
 
     AsyncCommand* submit_invoke_command(unsigned int cid,
                                         MemorySpace::Address entry,
-                                        MemorySpace::Address arg,
+                                        unsigned long arg,
                                         AsyncCommandCallback&& callback);
 
     NVMeStatus submit_ns_mgmt(unsigned int nsid, int sel,

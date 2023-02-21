@@ -256,9 +256,23 @@ void BARMemorySpace::read(Address addr, void* buf, size_t len)
     assert(addr < map_size && addr + len <= map_size);
     assert(!(addr & 0x7) && !(len & 0x7));
 
-    for (size_t i = 0; i < len; i += 8) {
-        *(uint64_t*)((char*)buf + i) =
-            *(volatile uint64_t*)((char*)map_base + addr + i);
+    char* ptr = (char*)buf;
+
+    while (len > 0) {
+        size_t offset = addr & 0x7;
+        unsigned int chunk = std::min(8 - offset, len);
+
+        assert((chunk == 4) || (chunk == 8));
+
+        if (chunk == 4) {
+            *(uint32_t*)ptr = *(volatile uint32_t*)((char*)map_base + addr);
+        } else {
+            *(uint64_t*)ptr = *(volatile uint64_t*)((char*)map_base + addr);
+        }
+
+        len -= chunk;
+        addr += chunk;
+        ptr += chunk;
     }
 }
 
@@ -270,9 +284,23 @@ void BARMemorySpace::write(Address addr, const void* buf, size_t len)
     assert(addr < map_size && addr + len <= map_size);
     assert(!(addr & 0x7) && !(len & 0x7));
 
-    for (size_t i = 0; i < len; i += 8) {
-        *(volatile uint64_t*)((char*)map_base + addr + i) =
-            *(uint64_t*)((char*)buf + i);
+    char* ptr = (char*)buf;
+
+    while (len > 0) {
+        size_t offset = addr & 0x7;
+        unsigned int chunk = std::min(8 - offset, len);
+
+        assert((chunk == 4) || (chunk == 8));
+
+        if (chunk == 4) {
+            *(volatile uint32_t*)((char*)map_base + addr) = *(uint32_t*)ptr;
+        } else {
+            *(volatile uint64_t*)((char*)map_base + addr) = *(uint64_t*)ptr;
+        }
+
+        len -= chunk;
+        addr += chunk;
+        ptr += chunk;
     }
 }
 
@@ -289,7 +317,19 @@ void BARMemorySpace::memset(Address addr, int c, size_t len)
     val |= val << 16;
     val |= val << 32;
 
-    for (size_t i = 0; i < len; i += 8) {
-        *(volatile uint64_t*)((char*)map_base + addr + i) = val;
+    while (len > 0) {
+        size_t offset = addr & 0x7;
+        unsigned int chunk = std::min(8 - offset, len);
+
+        assert((chunk == 4) || (chunk == 8));
+
+        if (chunk == 4) {
+            *(volatile uint32_t*)((char*)map_base + addr) = (uint32_t)val;
+        } else {
+            *(volatile uint64_t*)((char*)map_base + addr) = val;
+        }
+
+        len -= chunk;
+        addr += chunk;
     }
 }
