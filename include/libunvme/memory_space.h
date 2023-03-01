@@ -14,7 +14,7 @@ public:
         MemoryNotAvailable() : std::runtime_error("") {}
     };
 
-    virtual ~MemorySpace() {}
+    virtual ~MemorySpace();
 
     Address allocate(size_t len, size_t align = 1);
     Address allocate_pages(size_t len);
@@ -47,9 +47,9 @@ private:
         Address h_len;
     };
 
-    std::mutex alloc_mutex;
+    pthread_mutex_t* alloc_mutex;
 
-    std::array<struct hole, NR_HOLES> hole;
+    struct hole* hole;
     struct hole* hole_head;
     struct hole* free_slots;
 

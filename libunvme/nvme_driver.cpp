@@ -11,8 +11,7 @@ namespace endian = boost::endian;
 #define SQ_SIZE(nvmeq) ((nvmeq)->depth << ((nvmeq)->sqe_shift))
 #define CQ_SIZE(nvmeq) ((nvmeq)->depth * sizeof(NVMeDriver::NVMeCompletion))
 
-thread_local struct NVMeDriver::NVMeQueue* NVMeDriver::thread_io_queue =
-    nullptr;
+thread_local NVMeDriver::PNVMeQueue NVMeDriver::thread_io_queue = nullptr;
 
 NVMeDriver::DeviceIOError::DeviceIOError(const char* msg)
     : std::runtime_error(msg)
@@ -31,7 +30,7 @@ NVMeDriver::NVMeStatus NVMeDriver::AsyncCommand::wait(NVMeResult* resp)
     NVMeStatus out_status;
 
     {
-        std::unique_lock<std::mutex> lock(mutex);
+        std::unique_lock<MutexType> lock(mutex);
 
         while (!completed)
             cv.wait(lock);
@@ -47,7 +46,11 @@ NVMeDriver::NVMeStatus NVMeDriver::AsyncCommand::wait(NVMeResult* resp)
 NVMeDriver::NVMeDriver(unsigned ncpus, unsigned int io_queue_depth,
                        PCIeLink* link, MemorySpace* memory_space,
                        bool use_dbbuf)
-    : ncpus(ncpus), io_queue_depth(io_queue_depth), link(link),
+    :
+#ifdef ENABLE_INTERPROCESS
+      segment(boost::interprocess::open_or_create, "NVMeDriver", 512 << 20),
+#endif
+      ncpus(ncpus), io_queue_depth(io_queue_depth), link(link),
       memory_space(memory_space), queue_count(0), online_queues(0)
 {
     if (use_dbbuf) {
@@ -57,13 +60,47 @@ NVMeDriver::NVMeDriver(unsigned ncpus, unsigned int io_queue_depth,
     } else
         dbbuf_dbs = 0;
 
-    bar4_mem.reset(link->map_bar(4));
+    bar4_mem = link->map_bar(4);
+
+#ifdef ENABLE_INTERPROCESS
+    queues = segment.construct<std::vector<UniquePtrType<NVMeQueue>>>(
+        boost::interprocess::anonymous_instance)();
+    command_mutex =
+        segment.construct<MutexType>(boost::interprocess::anonymous_instance)();
+    command_map = segment.construct<CommandMapType>(
+        boost::interprocess::anonymous_instance)(10,
+                                                 segment.get_segment_manager());
+    command_id_counter = segment.construct<std::atomic<uint16_t>>(
+        boost::interprocess::anonymous_instance)();
+#else
+    queues = new std::vector<UniquePtrType<NVMeQueue>>();
+    command_mutex = new MutexType();
+    command_map = new CommandMapType();
+    command_id_counter = new std::atomic<uint16_t>();
+#endif
+}
+
+NVMeDriver::~NVMeDriver()
+{
+    delete bar4_mem;
+
+#ifdef ENABLE_INTERPROCESS
+    segment.destroy_ptr(queues);
+    segment.destroy_ptr(command_mutex);
+    segment.destroy_ptr(command_map);
+    segment.destroy_ptr(command_id_counter);
+#else
+    delete queues;
+    delete command_mutex;
+    delete command_map;
+    delete command_id_counter;
+#endif
 }
 
 void NVMeDriver::set_thread_id(unsigned int thread_id)
 {
-    assert(thread_id < queues.size());
-    thread_io_queue = queues[thread_id].get();
+    assert(thread_id < queues->size());
+    thread_io_queue = (*queues)[thread_id].get();
 }
 
 void NVMeDriver::start()
@@ -72,10 +109,10 @@ void NVMeDriver::start()
 
     /* IO queues + admin queue */
     for (int i = 0; i < ncpus + 1; i++)
-        queues.emplace_back(std::make_unique<NVMeQueue>());
+        queues->emplace_back(make_unique<NVMeQueue>());
 
     link->set_irq_handler([this](uint16_t vector) {
-        NVMeQueue* nvmeq = queues[vector].get();
+        PNVMeQueue nvmeq = (*queues)[vector].get();
         nvme_irq(nvmeq);
     });
 
@@ -84,7 +121,7 @@ void NVMeDriver::start()
 
 void NVMeDriver::allocate_queue(unsigned qid, unsigned depth)
 {
-    auto& nvmeq = queues[qid];
+    auto& nvmeq = (*queues)[qid];
 
     nvmeq->sqe_shift = qid ? NVME_NVM_IOSQES : NVME_ADM_SQES;
     nvmeq->depth = depth;
@@ -104,7 +141,7 @@ void NVMeDriver::allocate_queue(unsigned qid, unsigned depth)
 
 void NVMeDriver::init_queue(unsigned qid)
 {
-    auto& nvmeq = queues[qid];
+    auto& nvmeq = (*queues)[qid];
 
     nvmeq->sq_tail = 0;
     nvmeq->last_sq_tail = 0;
@@ -211,13 +248,13 @@ void NVMeDriver::enable_controller()
     wait_ready(true);
 }
 
-NVMeDriver::AsyncCommand*
+NVMeDriver::PAsyncCommand
 NVMeDriver::setup_async_command(AsyncCommandCallback&& callback)
 {
-    std::lock_guard<std::mutex> guard(command_mutex);
-    auto id = command_id_counter.fetch_add(1);
+    std::lock_guard<MutexType> guard(*command_mutex);
+    auto id = command_id_counter->fetch_add(1);
 
-    auto it = command_map.emplace(id, std::make_unique<AsyncCommand>()).first;
+    auto it = command_map->emplace(id, make_unique<AsyncCommand>()).first;
     auto& cmd = it->second;
     cmd->driver = this;
     cmd->space = memory_space;
@@ -230,11 +267,11 @@ NVMeDriver::setup_async_command(AsyncCommandCallback&& callback)
 
 void NVMeDriver::remove_async_command(uint16_t command_id)
 {
-    std::lock_guard<std::mutex> guard(command_mutex);
-    command_map.erase(command_id);
+    std::lock_guard<MutexType> guard(*command_mutex);
+    command_map->erase(command_id);
 }
 
-void NVMeDriver::setup_buffer(AsyncCommand* acmd, struct nvme_command* cmd,
+void NVMeDriver::setup_buffer(PAsyncCommand acmd, struct nvme_command* cmd,
                               MemorySpace::Address buf, size_t buflen)
 {
     auto offset = buf % ctrl_page_size;
@@ -292,7 +329,7 @@ void NVMeDriver::setup_buffer(AsyncCommand* acmd, struct nvme_command* cmd,
     cmd->common.dptr.prp2 = endian::native_to_little(prp2);
 }
 
-void NVMeDriver::write_sq_doorbell(NVMeQueue* nvmeq, bool write_sq)
+void NVMeDriver::write_sq_doorbell(PNVMeQueue nvmeq, bool write_sq)
 {
     uint32_t tail;
 
@@ -316,7 +353,7 @@ void NVMeDriver::write_sq_doorbell(NVMeQueue* nvmeq, bool write_sq)
     nvmeq->last_sq_tail = nvmeq->sq_tail;
 }
 
-void NVMeDriver::ring_cq_doorbell(NVMeQueue* nvmeq)
+void NVMeDriver::ring_cq_doorbell(PNVMeQueue nvmeq)
 {
     uint32_t head = nvmeq->cq_head;
 
@@ -326,7 +363,7 @@ void NVMeDriver::ring_cq_doorbell(NVMeQueue* nvmeq)
         link->writel(nvmeq->q_db + 4 * db_stride, head);
 }
 
-void NVMeDriver::submit_sq_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
+void NVMeDriver::submit_sq_command(PNVMeQueue nvmeq, struct nvme_command* cmd,
                                    bool write_sq)
 {
     memory_space->write(nvmeq->sq_dma_addr +
@@ -337,11 +374,11 @@ void NVMeDriver::submit_sq_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
 }
 
 NVMeDriver::NVMeStatus
-NVMeDriver::submit_sync_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
+NVMeDriver::submit_sync_command(PNVMeQueue nvmeq, struct nvme_command* cmd,
                                 MemorySpace::Address buf, size_t buflen,
                                 union nvme_completion::nvme_result* result)
 {
-    auto* acmd = setup_async_command({});
+    auto acmd = setup_async_command({});
 
     cmd->common.command_id = acmd->id;
 
@@ -354,12 +391,12 @@ NVMeDriver::submit_sync_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
     return acmd->wait(result);
 }
 
-NVMeDriver::AsyncCommand*
-NVMeDriver::submit_async_command(NVMeQueue* nvmeq, struct nvme_command* cmd,
+NVMeDriver::PAsyncCommand
+NVMeDriver::submit_async_command(PNVMeQueue nvmeq, struct nvme_command* cmd,
                                  MemorySpace::Address buf, size_t buflen,
                                  AsyncCommandCallback&& callback)
 {
-    auto* acmd = setup_async_command(std::move(callback));
+    auto acmd = setup_async_command(std::move(callback));
 
     cmd->common.command_id = acmd->id;
 
@@ -385,7 +422,7 @@ NVMeDriver::NVMeStatus NVMeDriver::nvme_features(uint8_t op, unsigned int fid,
     c.features.fid = endian::native_to_little(fid);
     c.features.dword11 = endian::native_to_little(dword11);
 
-    status = submit_sync_command(queues[0].get(), &c, 0, 0, &res);
+    status = submit_sync_command((*queues)[0].get(), &c, 0, 0, &res);
 
     if (result) *result = endian::little_to_native(res.u32);
     return status;
@@ -419,7 +456,7 @@ void NVMeDriver::dbbuf_config()
     c.common.opcode = nvme_admin_dbbuf;
     c.common.dptr.prp1 = endian::native_to_little(dbbuf_dbs);
 
-    status = submit_sync_command(queues[0].get(), &c, 0, 0, nullptr);
+    status = submit_sync_command((*queues)[0].get(), &c, 0, 0, nullptr);
 
     if (status) throw DeviceIOError("Failed to set dbbuf on device");
 }
@@ -430,7 +467,7 @@ void NVMeDriver::setup_admin_queue()
 
     allocate_queue(0, NVME_AQ_DEPTH);
 
-    auto& nvmeq = queues.front();
+    auto& nvmeq = queues->front();
     uint32_t aqa = nvmeq->depth - 1;
     aqa |= aqa << 16;
 
@@ -448,7 +485,7 @@ void NVMeDriver::setup_admin_queue()
 
 void NVMeDriver::setup_io_queues()
 {
-    int nr_io_queues = queues.size() - 1;
+    int nr_io_queues = queues->size() - 1;
     int max_qs;
     NVMeStatus status;
 
@@ -466,12 +503,12 @@ void NVMeDriver::setup_io_queues()
     for (int i = online_queues; i <= max_qs; i++) {
         NVMeStatus status;
 
-        status = create_queue(queues[i].get(), i);
+        status = create_queue((*queues)[i].get(), i);
         if (status != NVME_SC_SUCCESS) break;
     }
 }
 
-NVMeDriver::NVMeStatus NVMeDriver::create_queue(NVMeQueue* nvmeq, unsigned qid)
+NVMeDriver::NVMeStatus NVMeDriver::create_queue(PNVMeQueue nvmeq, unsigned qid)
 {
     NVMeStatus status;
 
@@ -485,11 +522,11 @@ NVMeDriver::NVMeStatus NVMeDriver::create_queue(NVMeQueue* nvmeq, unsigned qid)
     return 0;
 }
 
-NVMeDriver::NVMeStatus NVMeDriver::create_cq(NVMeQueue* nvmeq, unsigned qid,
+NVMeDriver::NVMeStatus NVMeDriver::create_cq(PNVMeQueue nvmeq, unsigned qid,
                                              unsigned int vector)
 {
     struct nvme_command c = {0};
-    auto& adminq = queues.front();
+    auto& adminq = queues->front();
     int flags = NVME_QUEUE_PHYS_CONTIG;
 
     memset(&c, 0, sizeof(c));
@@ -503,10 +540,10 @@ NVMeDriver::NVMeStatus NVMeDriver::create_cq(NVMeQueue* nvmeq, unsigned qid,
     return submit_sync_command(adminq.get(), &c, 0, 0, nullptr);
 }
 
-NVMeDriver::NVMeStatus NVMeDriver::create_sq(NVMeQueue* nvmeq, unsigned qid)
+NVMeDriver::NVMeStatus NVMeDriver::create_sq(PNVMeQueue nvmeq, unsigned qid)
 {
     struct nvme_command c = {0};
-    auto& adminq = queues.front();
+    auto& adminq = queues->front();
     int flags = NVME_QUEUE_PHYS_CONTIG;
 
     memset(&c, 0, sizeof(c));
@@ -523,7 +560,7 @@ NVMeDriver::NVMeStatus NVMeDriver::create_sq(NVMeQueue* nvmeq, unsigned qid)
 NVMeDriver::NVMeStatus NVMeDriver::identify_controller()
 {
     struct nvme_command c = {0};
-    auto& adminq = queues.front();
+    auto& adminq = queues->front();
     MemorySpace::Address id_buf;
     int status;
 
@@ -541,7 +578,7 @@ NVMeDriver::NVMeStatus NVMeDriver::identify_controller()
     return status;
 }
 
-bool NVMeDriver::cqe_pending(NVMeQueue* nvmeq)
+bool NVMeDriver::cqe_pending(PNVMeQueue nvmeq)
 {
     uint16_t status;
     struct nvme_completion* cqes = nullptr;
@@ -554,7 +591,7 @@ bool NVMeDriver::cqe_pending(NVMeQueue* nvmeq)
     return (status & 1) == nvmeq->cq_phase;
 }
 
-void NVMeDriver::handle_cqe(NVMeQueue* nvmeq, uint16_t idx)
+void NVMeDriver::handle_cqe(PNVMeQueue nvmeq, uint16_t idx)
 {
     struct nvme_completion cqe;
     uint16_t command_id;
@@ -568,10 +605,10 @@ void NVMeDriver::handle_cqe(NVMeQueue* nvmeq, uint16_t idx)
     bool release_cmd = false;
 
     {
-        std::lock_guard<std::mutex> guard(command_mutex);
-        auto it = command_map.find(command_id);
+        std::lock_guard<MutexType> guard(*command_mutex);
+        auto it = command_map->find(command_id);
 
-        if (it == command_map.end()) {
+        if (it == command_map->end()) {
             spdlog::error("Completion queue entry without command id={}",
                           command_id);
             return;
@@ -579,7 +616,7 @@ void NVMeDriver::handle_cqe(NVMeQueue* nvmeq, uint16_t idx)
 
         auto& cmd = it->second;
         {
-            std::unique_lock<std::mutex> lock(cmd->mutex);
+            std::unique_lock<AsyncCommand::MutexType> lock(cmd->mutex);
 
             auto status = endian::little_to_native(cqe.status) >> 1;
             if (cmd->callback) {
@@ -598,7 +635,7 @@ void NVMeDriver::handle_cqe(NVMeQueue* nvmeq, uint16_t idx)
     if (release_cmd) remove_async_command(command_id);
 }
 
-void NVMeDriver::nvme_irq(NVMeQueue* nvmeq)
+void NVMeDriver::nvme_irq(PNVMeQueue nvmeq)
 {
     int found = 0;
 
@@ -611,7 +648,7 @@ void NVMeDriver::nvme_irq(NVMeQueue* nvmeq)
     if (found) ring_cq_doorbell(nvmeq);
 }
 
-NVMeDriver::AsyncCommand*
+NVMeDriver::PAsyncCommand
 NVMeDriver::submit_rw_command(bool do_write, unsigned int nsid, loff_t pos,
                               MemorySpace::Address buf, size_t size,
                               AsyncCommandCallback&& callback)
@@ -636,7 +673,7 @@ NVMeDriver::submit_rw_command(bool do_write, unsigned int nsid, loff_t pos,
                                 std::move(callback));
 }
 
-NVMeDriver::AsyncCommand*
+NVMeDriver::PAsyncCommand
 NVMeDriver::submit_flush_command(unsigned int nsid,
                                  AsyncCommandCallback&& callback)
 {
@@ -699,7 +736,7 @@ uint32_t NVMeDriver::create_context(const std::filesystem::path& filename)
 
     struct nvme_command c = {0};
     union nvme_completion::nvme_result res;
-    auto& adminq = queues.front();
+    auto& adminq = queues->front();
 
     memset(&c, 0, sizeof(c));
     c.common.opcode = nvme_admin_storpu_create_context;
@@ -719,7 +756,7 @@ void NVMeDriver::delete_context(unsigned int cid)
 {
     struct nvme_command c = {0};
     union nvme_completion::nvme_result res;
-    auto& adminq = queues.front();
+    auto& adminq = queues->front();
 
     memset(&c, 0, sizeof(c));
     c.common.opcode = nvme_admin_storpu_delete_context;
@@ -731,7 +768,7 @@ void NVMeDriver::delete_context(unsigned int cid)
         throw DeviceIOError("Delete context error");
 }
 
-NVMeDriver::AsyncCommand*
+NVMeDriver::PAsyncCommand
 NVMeDriver::submit_invoke_command(unsigned int cid, MemorySpace::Address entry,
                                   unsigned long arg,
                                   AsyncCommandCallback&& callback)
@@ -772,7 +809,7 @@ NVMeDriver::submit_ns_mgmt(unsigned int nsid, int sel,
                            union nvme_completion::nvme_result* res)
 {
     struct nvme_command c = {0};
-    auto& adminq = queues.front();
+    auto& adminq = queues->front();
     int status;
 
     memset(&c, 0, sizeof(c));
@@ -824,7 +861,7 @@ NVMeDriver::NVMeStatus NVMeDriver::submit_ns_attach(unsigned int nsid, int sel,
                                                     size_t size)
 {
     struct nvme_command c = {0};
-    auto& adminq = queues.front();
+    auto& adminq = queues->front();
     int status;
 
     memset(&c, 0, sizeof(c));

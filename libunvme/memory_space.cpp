@@ -14,6 +14,19 @@ MemorySpace::MemorySpace(Address iova_base) : iova_base(iova_base)
 {
     struct hole* hp;
 
+    pthread_mutexattr_t attrmutex;
+    pthread_mutexattr_init(&attrmutex);
+    pthread_mutexattr_setpshared(&attrmutex, PTHREAD_PROCESS_SHARED);
+    alloc_mutex = (pthread_mutex_t*)::mmap(NULL, sizeof(*alloc_mutex),
+                                           PROT_READ | PROT_WRITE,
+                                           MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    pthread_mutex_init(alloc_mutex, &attrmutex);
+    pthread_mutexattr_destroy(&attrmutex);
+
+    hole = (struct hole*)::mmap(NULL, sizeof(struct hole) * NR_HOLES,
+                                PROT_READ | PROT_WRITE,
+                                MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+
     for (hp = &hole[0]; hp < &hole[NR_HOLES]; hp++) {
         hp->h_next = hp + 1;
         hp->h_base = 0;
@@ -22,6 +35,11 @@ MemorySpace::MemorySpace(Address iova_base) : iova_base(iova_base)
     hole[NR_HOLES - 1].h_next = NULL;
     hole_head = NULL;
     free_slots = &hole[0];
+}
+
+MemorySpace::~MemorySpace()
+{
+    if (hole) munmap(hole, sizeof(struct hole) * NR_HOLES);
 }
 
 void MemorySpace::delete_slot(struct hole* prev_ptr, struct hole* hp)
@@ -59,7 +77,8 @@ MemorySpace::Address MemorySpace::allocate(size_t len, size_t align)
 {
     struct hole *hp, *prev_ptr;
     Address old_base;
-    std::lock_guard<std::mutex> guard(alloc_mutex);
+
+    pthread_mutex_lock(alloc_mutex);
 
     prev_ptr = NULL;
     hp = hole_head;
@@ -75,6 +94,7 @@ MemorySpace::Address MemorySpace::allocate(size_t len, size_t align)
 
             if (hp->h_len == 0) delete_slot(prev_ptr, hp);
 
+            pthread_mutex_unlock(alloc_mutex);
             return old_base;
         }
 
@@ -82,6 +102,7 @@ MemorySpace::Address MemorySpace::allocate(size_t len, size_t align)
         hp = hp->h_next;
     }
 
+    pthread_mutex_unlock(alloc_mutex);
     throw MemoryNotAvailable();
 }
 
@@ -93,10 +114,13 @@ MemorySpace::Address MemorySpace::allocate_pages(size_t len)
 void MemorySpace::free(Address addr, size_t len)
 {
     struct hole *hp, *new_ptr, *prev_ptr;
-    std::lock_guard<std::mutex> guard(alloc_mutex);
 
     if (len == 0) return;
+
+    pthread_mutex_lock(alloc_mutex);
+
     if ((new_ptr = free_slots) == NULL) {
+        pthread_mutex_unlock(alloc_mutex);
         spdlog::error("Memory space hole table full");
         abort();
     }
@@ -110,6 +134,7 @@ void MemorySpace::free(Address addr, size_t len)
         new_ptr->h_next = hp;
         hole_head = new_ptr;
         merge_hole(new_ptr);
+        pthread_mutex_unlock(alloc_mutex);
         return;
     }
 
@@ -122,6 +147,7 @@ void MemorySpace::free(Address addr, size_t len)
     new_ptr->h_next = prev_ptr->h_next;
     prev_ptr->h_next = new_ptr;
     merge_hole(prev_ptr);
+    pthread_mutex_unlock(alloc_mutex);
 }
 
 void MemorySpace::free_pages(Address addr, size_t len)
@@ -221,7 +247,7 @@ VfioMemorySpace::VfioMemorySpace(Address iova_base, size_t size)
     : MemorySpace(iova_base)
 {
     void* base = ::mmap(NULL, size, PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                        MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (base == MAP_FAILED) {
         spdlog::error("Error mapping shared memory file: {}",
                       ::strerror(errno));

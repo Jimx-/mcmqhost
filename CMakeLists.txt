@@ -38,7 +38,13 @@ include_directories(${TOPDIR}/include
                     ${TOPDIR}/lib
                     ${CMAKE_CURRENT_BINARY_DIR}
                     )
-                    
+
+option(USE_INTERPROCESS "Enable interprocess support" OFF)
+
+if (USE_INTERPROCESS)
+   add_definitions(-DENABLE_INTERPROCESS)
+endif()
+
 add_subdirectory(libmcmq)
 add_subdirectory(libunvme)
 add_subdirectory(mcmqhost)
