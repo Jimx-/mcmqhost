@@ -2,11 +2,17 @@
 spdlog/1.11.0
 cxxopts/[>=2.2.0]
 yaml-cpp/0.6.3
-nlohmann_json/3.9.1
-hdrhistogram-c/0.11.1
+nlohmann_json/3.11.2
+hdrhistogram-c/0.11.6
+protobuf/3.21.9
+
+[tool_requires]
+protobuf/3.21.9
 
 [generators]
-cmake
+CMakeDeps
+CMakeToolchain
 
 [options]
-spdlog:shared = False
+spdlog/*:shared = False
+protobuf/*:shared = False

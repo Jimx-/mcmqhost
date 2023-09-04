@@ -1,7 +1,7 @@
 #ifndef _REPORT_EXPORTER_H_
 #define _REPORT_EXPORTER_H_
 
-#include "sim_result.pb.h"
+#include "proto/sim_result.pb.h"
 
 #include "io_thread.h"
 

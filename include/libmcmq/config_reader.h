@@ -1,7 +1,7 @@
 #ifndef _CONFIG_READER_H_
 #define _CONFIG_READER_H_
 
-#include "ssd_config.pb.h"
+#include "proto/ssd_config.pb.h"
 
 #include <string>
 #include <unordered_map>

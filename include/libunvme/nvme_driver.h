@@ -118,6 +118,13 @@ public:
     unsigned long invoke_function(unsigned int cid, MemorySpace::Address entry,
                                   unsigned long arg);
 
+    void invoke_function_async(unsigned int cid, MemorySpace::Address entry,
+                               unsigned long arg,
+                               AsyncCommandCallback&& callback)
+    {
+        (void)submit_invoke_command(cid, entry, arg, std::move(callback));
+    }
+
     unsigned int create_namespace(size_t size_bytes);
     void delete_namespace(unsigned int nsid);
     void attach_namespace(unsigned int nsid);

@@ -12,8 +12,6 @@
 
 #include <libtest_symbols.h>
 
-using cxxopts::OptionException;
-
 static const size_t CHUNK_SIZE = 128UL << 20;
 static const size_t LOAD_PAGE_SIZE = 0x4000;
 
@@ -44,7 +42,7 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
         }
 
         return result;
-    } catch (const OptionException& e) {
+    } catch (const cxxopts::exceptions::exception& e) {
         exit(EXIT_FAILURE);
     }
 }
@@ -67,7 +65,7 @@ int main(int argc, char* argv[])
         load_file = args["file"].as<std::string>();
         nsid = args["namespace"].as<int>();
         library = args["lib"].as<std::string>();
-    } catch (const OptionException& e) {
+    } catch (const cxxopts::exceptions::exception& e) {
         spdlog::error("Failed to parse options: {}", e.what());
         exit(EXIT_FAILURE);
     }
@@ -80,7 +78,7 @@ int main(int argc, char* argv[])
 
         try {
             shared_memory = args["memory"].as<std::string>();
-        } catch (const OptionException& e) {
+        } catch (const cxxopts::exceptions::exception& e) {
             spdlog::error("Failed to parse options: {}", e.what());
             exit(EXIT_FAILURE);
         }
@@ -93,7 +91,7 @@ int main(int argc, char* argv[])
         try {
             group = args["group"].as<std::string>();
             device_id = args["device"].as<std::string>();
-        } catch (const OptionException& e) {
+        } catch (const cxxopts::exceptions::exception& e) {
             spdlog::error("Failed to parse options: {}", e.what());
             exit(EXIT_FAILURE);
         }
@@ -199,6 +197,8 @@ int main(int argc, char* argv[])
 
         scratchpad->free(argbuf, sizeof(lda));
     }
+
+    driver.delete_context(ctx);
 
 shutdown:
     driver.shutdown();

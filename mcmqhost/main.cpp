@@ -12,8 +12,6 @@
 
 #include <thread>
 
-using cxxopts::OptionException;
-
 cxxopts::ParseResult parse_arguments(int argc, char* argv[])
 {
     try {
@@ -45,7 +43,7 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
         }
 
         return result;
-    } catch (const OptionException& e) {
+    } catch (const cxxopts::exceptions::exception& e) {
         exit(EXIT_FAILURE);
     }
 }
@@ -63,7 +61,7 @@ int main(int argc, char* argv[])
         config_file = args["config"].as<std::string>();
         workload_file = args["workload"].as<std::string>();
         result_file = args["result"].as<std::string>();
-    } catch (const OptionException& e) {
+    } catch (const cxxopts::exceptions::exception& e) {
         spdlog::error("Failed to parse options: {}", e.what());
         exit(EXIT_FAILURE);
     }
@@ -89,7 +87,7 @@ int main(int argc, char* argv[])
 
         try {
             shared_memory = args["memory"].as<std::string>();
-        } catch (const OptionException& e) {
+        } catch (const cxxopts::exceptions::exception& e) {
             spdlog::error("Failed to parse options: {}", e.what());
             exit(EXIT_FAILURE);
         }
@@ -102,7 +100,7 @@ int main(int argc, char* argv[])
         try {
             group = args["group"].as<std::string>();
             device_id = args["device"].as<std::string>();
-        } catch (const OptionException& e) {
+        } catch (const cxxopts::exceptions::exception& e) {
             spdlog::error("Failed to parse options: {}", e.what());
             exit(EXIT_FAILURE);
         }

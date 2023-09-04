@@ -9,8 +9,8 @@ set(EXT_SOURCE_FILES
 set(LIBRARIES
     pthread
     atomic
-    CONAN_PKG::spdlog
-    CONAN_PKG::cxxopts
+    spdlog::spdlog
+    cxxopts::cxxopts
     unvme
     mcmq    
 )

@@ -2,8 +2,8 @@
 #define _PCIE_LINK_H_
 
 #include "memory_space.h"
-#include "sim_result.pb.h"
-#include "ssd_config.pb.h"
+#include "proto/sim_result.pb.h"
+#include "proto/ssd_config.pb.h"
 
 #include <atomic>
 #include <condition_variable>

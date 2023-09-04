@@ -24,8 +24,6 @@
 
 #define NSID_XATTR "user.mirrorfs.nsid"
 
-using cxxopts::OptionException;
-
 typedef std::pair<ino_t, dev_t> SrcId;
 
 namespace std {
@@ -909,7 +907,7 @@ cxxopts::ParseResult parse_arguments(int argc, char* argv[])
         }
 
         return result;
-    } catch (const OptionException& e) {
+    } catch (const cxxopts::exceptions::exception& e) {
         spdlog::error("Failed to parse arguments: {}", e.what());
         exit(EXIT_FAILURE);
     }
@@ -934,7 +932,7 @@ int main(int argc, char* argv[])
 
         group = options["group"].as<std::string>();
         device_id = options["device"].as<std::string>();
-    } catch (const OptionException& e) {
+    } catch (const cxxopts::exceptions::exception& e) {
         spdlog::error("Failed to parse options: {}", e.what());
         exit(EXIT_FAILURE);
     }

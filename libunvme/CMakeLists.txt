@@ -4,13 +4,13 @@ set(SOURCE_FILES
     pcie_link_vfio.cpp
     memory_space.cpp
     nvme_driver.cpp
-    capi.cpp
 )
 
 set(LIBRARIES
     pthread
     atomic
-    CONAN_PKG::spdlog
+    spdlog::spdlog
+    protobuf::libprotobuf
 )
 
 add_library(unvme STATIC ${SOURCE_FILES})

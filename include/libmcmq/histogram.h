@@ -1,7 +1,7 @@
 #ifndef _HISTOGRAM_H_
 #define _HISTOGRAM_H_
 
-#include <hdr/hdr_histogram.h>
+#include "hdr_histogram.h"
 
 struct Histogram {
     Histogram(unsigned long max_value) : max_value(max_value)

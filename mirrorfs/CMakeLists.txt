@@ -7,8 +7,8 @@ include_directories(${FUSE3_INCLUDE_DIRS})
 set(LIBRARIES
     pthread
     atomic
-    CONAN_PKG::spdlog
-    CONAN_PKG::cxxopts
+    spdlog::spdlog
+    cxxopts::cxxopts
     unvme
     ${FUSE3_LIBRARIES}
 )
